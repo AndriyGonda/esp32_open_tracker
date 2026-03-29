@@ -87,7 +87,7 @@ Long press the button on GPIO10 to open the configuration portal:
 | 12 | Jumper wires                  | —  | For connections              |
 | 13 | Knurled nuts M3                  | 8  | For case and covers              |
 
-## Assembly
+## Assembly of the device
 
 ### Board assembly
 
