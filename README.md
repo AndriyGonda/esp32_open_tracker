@@ -82,6 +82,7 @@ Long press the button on GPIO10 to open the configuration portal:
 - Arduino framework for ESP32 (PlatformIO)
 
 
+
 ## Bill of Materials
 
 | #  | Component                     | Qty | Notes                        |
@@ -99,6 +100,16 @@ Long press the button on GPIO10 to open the configuration portal:
 | 11 | Capacitor 100nF (or 220nF)    | 1   | ADC noise filtering on GPIO1 |
 | 12 | Perfboard 50×70mm            | 1   | For soldering components     |
 | 13 | Jumper wires                  | —  | For connections              |
+
+## 3D Printed Case
+
+Print files are located in the `3d/` folder:
+
+| File | Description |
+|------|-------------|
+| [`case_box_tracker.STL`](3d/case_box_tracker.STL) | Main enclosure body |
+| [`case_lid.STL`](3d/case_lid.STL) | Enclosure lid |
+| [`case_mount.STL`](3d/case_mount.STL) | Mounting bracket |
 
 ## License
 
