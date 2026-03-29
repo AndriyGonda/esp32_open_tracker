@@ -2,6 +2,7 @@
 
 An open-source GPS tracker built on the ESP32-C3 microcontroller, designed for real-time vehicle or asset tracking via the OsmAnd protocol.
 
+
 ## Features
 
 - **Real-time GPS tracking** — sends location data to any OsmAnd-compatible server (e.g. m2m.eu,  Traccar)
@@ -84,6 +85,23 @@ Long press the button on GPIO10 to open the configuration portal:
 | 10 | Capacitor 100nF (or 220nF)    | 1   | ADC noise filtering on GPIO1 |
 | 11 | Perfboard 50×70mm            | 1   | For soldering components     |
 | 12 | Jumper wires                  | —  | For connections              |
+| 13 | Knurled nuts M3                  | 8  | For case and covers              |
+
+## Assembly
+
+### Board assembly
+
+![Board bottom](assets/board_bottom.jpg)
+
+![Board top](assets/board_top.jpg)
+
+### Case with board assembly
+
+![Board top](assets/case_parts.jpg)
+
+![Board top](assets/case_assembled.jpg)
+
+
 
 ## 3D Printed Case
 
