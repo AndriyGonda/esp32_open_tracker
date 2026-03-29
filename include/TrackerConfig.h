@@ -1,0 +1,30 @@
+#pragma once
+
+// OsmAnd device id (must be unique for navigation system like Traccar or M2M)
+#define TRACKER_DEVICE_ID "1122334455"
+
+// Sending intervals
+#define TRACKER_INTERVAL_STATIC    30000   // idle
+#define TRACKER_INTERVAL_MOVING    10000   // moving
+#define TRACKER_INTERVAL_TURNING    2000   // rotation
+
+// Speed threshold in km/h
+#define TRACKER_SPEED_THRESHOLD     4.0f  
+
+// Bearing threshold in dec
+#define TRACKER_BEARING_THRESHOLD   7.0f   
+
+
+// Blackbox setup 
+#define TRACKER_BLACKBOX_PATH       "/blackbox.csv"
+#define TRACKER_BLACKBOX_MIN_FREE   51200 
+
+
+
+/*HOME POINT FILTERING (Preventing gps spoofing) */
+#define ENABLE_HOME_POINT_FILTERING true
+#define TRACKER_HOME_LAT        49.439315 
+#define TRACKER_HOME_LNG        32.006180 
+#define TRACKER_HOME_RADIUS_KM   500.0f 
+#define SENDING_LAT 0.0
+#define SENDING_LNG 0.0
