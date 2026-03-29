@@ -86,6 +86,7 @@ Long press the button on GPIO10 to open the configuration portal:
 | 11 | Perfboard 50×70mm            | 1   | For soldering components     |
 | 12 | Jumper wires                  | —  | For connections              |
 | 13 | Knurled nuts M3                  | 8  | For case and covers              |
+| 13 | Nut M3х10                  | 8  | For case and covers              |
 
 ## Assembly of the device
 
