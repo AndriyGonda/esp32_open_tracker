@@ -12,7 +12,7 @@ An open-source GPS tracker built on the ESP32-C3 microcontroller, designed for r
 - **Black box** — stores track points to LittleFS flash when offline, automatically uploads when connection is restored
 - **Battery monitoring** — measures voltage via ADC with resistor divider, sends battery level with each packet
 - **Power management** — low battery warning via buzzer, deep sleep on critical battery level (<2.9V)
-- **Privacy zone** — replaces real coordinates with home location when within a configurable radius
+- **FIltering zone** — replaces real coordinates with home location when without a configurable radius to make spoofing filtering
 - **Wi-Fi manager** — web-based configuration portal (AP mode) for managing Wi-Fi networks and server settings
 - **Auto reconnect** — automatically reconnects to saved Wi-Fi networks in the background
 - **LED indicators** — non-blocking LED feedback for Wi-Fi connection and successful data transmission
