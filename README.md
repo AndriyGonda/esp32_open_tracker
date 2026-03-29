@@ -26,7 +26,22 @@ An open-source GPS tracker built on the ESP32-C3 microcontroller, designed for r
 - **Buzzer**: Passive buzzer on GPIO5
 - **Button**: Long press on GPIO10 opens config portal
 
-## Configuration
+## Bill of Materials
+
+| # | Component | Qty | Notes |
+|---|-----------|-----|-------|
+| 1 | ESP32-C3 Super Mini | 1 | Main microcontroller |
+| 2 | GP-02 GPS module (possible to use any UART GPS modules aka Ublox Neo 6M)  | 1 | NMEA, 9600 baud |
+| 3 | Resistor —120kΩ ( or 100kΩ) | 2 | Voltage divider for battery monitoring |
+| 4 | Passive buzzer | 1 | 3.3V compatible |
+| 5 | Tactile push button | 1 | Config portal trigger |
+| 6 | DC-DC boost converter (5V) | 1 | Powers GPS module |
+| 7 | TP4056 charger module (USB-C) | 1 | Li-ion battery charging |
+| 8 | 18650 Li-ion battery with pin | 1 | Main power source |
+| 9 | 18650 battery holder | 1 |--- |
+| 10 | Capacitor 100nF (or 220nF) | 1 | ADC noise filtering on GPIO1 |
+| 11 | Perfboard 50×70mm | 1 | For soldering components |
+| 12 | Jumper wires | — | For connections |
 
 All key parameters are defined in `include/TrackerConfig.h`:
 
@@ -69,3 +84,22 @@ Long press the button on GPIO10 to open the configuration portal:
 ## License
 
 LGPL3
+
+## Bill of Materials
+
+| #  | Component                     | Qty | Notes                        |
+| -- | ----------------------------- | --- | ---------------------------- |
+| 1  | ESP32-C3 Super Mini           | 1   | Main microcontroller         |
+| 2  | GP-02 GPS module              | 1   | NMEA, 9600 baud              |
+| 3  | Resistor 120kΩ               | 1   | Voltage divider (upper)      |
+| 4  | Resistor 100kΩ               | 1   | Voltage divider (lower)      |
+| 5  | Passive buzzer                | 1   | 3.3V compatible              |
+| 6  | Tactile push button           | 1   | Config portal trigger        |
+| 7  | DC-DC boost converter (5V)    | 1   | Powers GPS module            |
+| 8  | TP4056 charger module (USB-C) | 1   | Li-ion battery charging      |
+| 9  | 18650 Li-ion battery with pin | 1   | Main power source            |
+| 10 | 18650 battery holder          | 1   |                              |
+| 11 | Capacitor 100nF (or 220nF)    | 1   | ADC noise filtering on GPIO1 |
+| 12 | Perfboard 50×70mm            | 1   | For soldering components     |
+| 13 | Jumper wires                  | —  | For connections              |
+
