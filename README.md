@@ -75,7 +75,7 @@ Long press the button on GPIO10 to open the configuration portal:
 | -- | ----------------------------- | --- | ---------------------------- |
 | 1  | ESP32-C3 Super Mini           | 1   | Main microcontroller         |
 | 2  | GP-02 GPS module              | 1   | NMEA, 9600 baud              |
-| 3  | Resistor 120kΩ               | 2  | Voltage divider (upper)      |
+| 3  | Resistor 120kΩ               | 2  | Voltage divider     |
 | 4  | Passive buzzer                | 1   | 3.3V compatible              |
 | 5  | Tactile push button           | 1   | Config portal trigger        |
 | 6  | DC-DC boost converter (5V)    | 1   | Powers GPS module            |
