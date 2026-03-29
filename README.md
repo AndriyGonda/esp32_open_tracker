@@ -65,7 +65,9 @@ Long press the button on GPIO10 to open the configuration portal:
 - [TinyGPS++](https://github.com/mikalhart/TinyGPSPlus)
 - Arduino framework for ESP32 (PlatformIO)
 
+## Schematic
 
+![ESP Open Tracker](assets/schematic.png)
 
 ## Bill of Materials
 
