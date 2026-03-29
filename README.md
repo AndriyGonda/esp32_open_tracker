@@ -81,9 +81,6 @@ Long press the button on GPIO10 to open the configuration portal:
 - [TinyGPS++](https://github.com/mikalhart/TinyGPSPlus)
 - Arduino framework for ESP32 (PlatformIO)
 
-## License
-
-LGPL3
 
 ## Bill of Materials
 
@@ -102,4 +99,8 @@ LGPL3
 | 11 | Capacitor 100nF (or 220nF)    | 1   | ADC noise filtering on GPIO1 |
 | 12 | Perfboard 50×70mm            | 1   | For soldering components     |
 | 13 | Jumper wires                  | —  | For connections              |
+
+## License
+
+LGPL3
 
