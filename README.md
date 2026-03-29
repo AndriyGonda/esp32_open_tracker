@@ -4,7 +4,7 @@ An open-source GPS tracker built on the ESP32-C3 microcontroller, designed for r
 
 ## Features
 
-- **Real-time GPS tracking** — sends location data to any OsmAnd-compatible server (e.g. Traccar)
+- **Real-time GPS tracking** — sends location data to any OsmAnd-compatible server (e.g. m2m.eu,  Traccar)
 - **Adaptive send interval** — adjusts automatically based on movement:
   - Stationary: every 30 seconds
   - Moving: every 10 seconds
@@ -12,7 +12,7 @@ An open-source GPS tracker built on the ESP32-C3 microcontroller, designed for r
 - **Black box** — stores track points to LittleFS flash when offline, automatically uploads when connection is restored
 - **Battery monitoring** — measures voltage via ADC with resistor divider, sends battery level with each packet
 - **Power management** — low battery warning via buzzer, deep sleep on critical battery level (<2.9V)
-- **FIltering zone** — replaces real coordinates with home location when without a configurable radius to make spoofing filtering
+- **Filtering zone** — replaces real coordinates with home location if coordinates outside of a configurable radius to handle gps spoofing
 - **Wi-Fi manager** — web-based configuration portal (AP mode) for managing Wi-Fi networks and server settings
 - **Auto reconnect** — automatically reconnects to saved Wi-Fi networks in the background
 - **LED indicators** — non-blocking LED feedback for Wi-Fi connection and successful data transmission
