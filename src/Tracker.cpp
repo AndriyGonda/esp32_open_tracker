@@ -372,7 +372,7 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
         if (gpsTime > 0) {
             bool tooOld = gpsTime < MIN_VALID_TIME;
             bool tooFarInFuture = lastValidUnixTime > 0 &&
-                                  gpsTime > lastValidUnixTime + 60;
+                                  gpsTime > lastValidUnixTime + ONE_YEAR_SECONDS;
 
             if (!tooOld && !tooFarInFuture) {
                 lastValidUnixTime = gpsTime;

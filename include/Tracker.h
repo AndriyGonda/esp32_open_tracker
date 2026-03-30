@@ -33,6 +33,7 @@ private:
     uint8_t accumCount = 0;
     unsigned long lastAccumAt = 0;
     static constexpr unsigned long ACCUM_INTERVAL_MS = 10000;
+    static constexpr unsigned long ONE_YEAR_SECONDS = 365UL * 24 * 3600;
 
     unsigned long lastValidUnixTime = 0;
     uint64_t lastValidMicros = 0;
