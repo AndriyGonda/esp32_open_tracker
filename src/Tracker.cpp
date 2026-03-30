@@ -364,12 +364,27 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
         syncTimeNTP();
     }
 
-    unsigned long gpsTime = gps.hasTime() ? gps.getUnixTime() : 0;
+    static constexpr unsigned long MIN_VALID_TIME = 1704067200UL;
 
-    if (!invalid && gpsTime > 0) {
-        lastValidUnixTime = gpsTime;
-        lastValidMicros = esp_timer_get_time();
-        return gpsTime;
+    if (!invalid) {
+        unsigned long gpsTime = gps.hasTime() ? gps.getUnixTime() : 0;
+
+        if (gpsTime > 0) {
+            bool tooOld = gpsTime < MIN_VALID_TIME;
+            bool tooFarInFuture = lastValidUnixTime > 0 &&
+                                  gpsTime > lastValidUnixTime + 60;
+
+            if (!tooOld && !tooFarInFuture) {
+                lastValidUnixTime = gpsTime;
+                lastValidMicros = esp_timer_get_time();
+                return gpsTime;
+            }
+
+            Serial.print("[Tracker] suspicious GPS time: ");
+            Serial.println(gpsTime);
+        }
+    } else {
+        Serial.println("[Tracker] GPS time untrusted (spoofing)");
     }
 
     if (lastValidUnixTime > 0) {
