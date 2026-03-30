@@ -5,7 +5,7 @@
 
 
 // Max valid hdop for tracker
-#define MAX_HDOP 2.0
+#define MAX_HDOP 10.0
 
 // Sending intervals
 #define TRACKER_INTERVAL_STATIC   120000   // idle
@@ -35,5 +35,5 @@
 #define SENDING_LNG 0.0
 
 /*BATTERY MANAGEMENT */
-#define BATTERY_LOW_VOLTAGE       3.2f
-#define BATTERY_CRITICAL_VOLTAGE  2.9f
+#define BATTERY_LOW_VOLTAGE       3.5f
+#define BATTERY_CRITICAL_VOLTAGE  3.0f

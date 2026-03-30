@@ -43,19 +43,19 @@ void PowerManager::update() {
 }
 
 bool PowerManager::isLowBattery() const {
-    return voltage > 0.5f && voltage < POWER_LOW_BATT_V;
+    return battery.isLow();
 }
 
 bool PowerManager::isCriticalBattery() const {
-    return voltage > 0.5f && voltage < POWER_CRITICAL_BATT_V;
+    return battery.isCritical();
 }
 
 bool PowerManager::isOperational() const {
-    return voltage < 0.5f || voltage >= POWER_CRITICAL_BATT_V;
+    return voltage < 0.5f || !battery.isCritical();
 }
 
 void PowerManager::beep(uint16_t durationMs) {
-    ledcWrite(POWER_BUZZER_PIN, 128);
+    ledcWrite(POWER_BUZZER_PIN, 64);
     delay(durationMs);
     ledcWrite(POWER_BUZZER_PIN, 0);
 }
