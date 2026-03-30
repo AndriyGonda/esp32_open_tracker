@@ -16,15 +16,22 @@ void Tracker::begin() {
 }
 
 void Tracker::update() {
-    if (!gps.hasLocation()) {
-        return;
-    }
 
     if (portal.isActive()) {
         if (flushing) {
             flushFile.close();
             flushing = false;
         }
+        return;
+    }
+
+    if (!gps.hasLocation()) {
+        return;
+    }
+
+    if (gps.getHdop() > MAX_HDOP) {
+        Serial.print("[Tracker] poor HDOP: ");
+        Serial.println(gps.getHdop());
         return;
     }
 
@@ -68,7 +75,7 @@ void Tracker::update() {
     if (lastBearing < 0.0f) {
         lastBearing = bearing;
     }
-
+    
     if (WiFi.status() == WL_CONNECTED) {
         if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
             startFlush();

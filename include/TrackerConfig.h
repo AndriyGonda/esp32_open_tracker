@@ -3,6 +3,10 @@
 // OsmAnd device id (must be unique for navigation system like Traccar or M2M)
 #define TRACKER_DEVICE_ID "1122334455"
 
+
+// Max valid hdop for tracker
+#define MAX_HDOP 2.0
+
 // Sending intervals
 #define TRACKER_INTERVAL_STATIC    30000   // idle
 #define TRACKER_INTERVAL_MOVING    10000   // moving
