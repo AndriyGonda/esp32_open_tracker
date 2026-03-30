@@ -67,7 +67,12 @@ void Tracker::update() {
         }
     }
 
-    float speed   = isInvalidCoordinates ? 0.0 : gps.getSpeed() ;
+    float speed   = isInvalidCoordinates ? 0.0 : gps.getSpeed();
+
+    if (speed > TRACKER_MAX_VALID_SPEED)  {
+        speed = 0.0;
+    }
+
     float bearing = gps.getBearing();
 
     if (lastBearing < 0.0f) {
@@ -94,6 +99,10 @@ unsigned long Tracker::currentInterval() {
 
     float speed   = gps.getSpeed();
     float bearing = gps.getBearing();
+    
+    if (speed > TRACKER_MAX_VALID_SPEED) {
+        speed = 0.0;
+    }
 
     if (speed < TRACKER_SPEED_THRESHOLD) {
         return TRACKER_INTERVAL_STATIC;

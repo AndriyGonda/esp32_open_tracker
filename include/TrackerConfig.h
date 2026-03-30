@@ -8,12 +8,13 @@
 #define MAX_HDOP 2.0
 
 // Sending intervals
-#define TRACKER_INTERVAL_STATIC    30000   // idle
+#define TRACKER_INTERVAL_STATIC   120000   // idle
 #define TRACKER_INTERVAL_MOVING    10000   // moving
 #define TRACKER_INTERVAL_TURNING    2000   // rotation
 
 // Speed threshold in km/h
-#define TRACKER_SPEED_THRESHOLD     4.0f  
+#define TRACKER_SPEED_THRESHOLD     4.0f
+#define TRACKER_MAX_VALID_SPEED    100.0f  
 
 // Bearing threshold in dec
 #define TRACKER_BEARING_THRESHOLD   7.0f   
