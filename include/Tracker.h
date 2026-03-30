@@ -39,7 +39,11 @@ private:
     void startFlush();
     void flushNextLine();
 
-    String buildUrl(double lat, double lng, float speed, float bearing, unsigned long timestamp);
+    String buildUrl(double lat, double lng, float speed, float bearing,
+                    unsigned long timestamp, float voltage,
+                    float altitude, uint32_t satellites,
+                    float hdop, uint32_t freeKb);
+
     float bearingDiff(float a, float b);
     float distanceTo(double lat1, double lng1, double lat2, double lng2);
 };

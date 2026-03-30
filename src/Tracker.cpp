@@ -16,7 +16,6 @@ void Tracker::begin() {
 }
 
 void Tracker::update() {
-
     if (portal.isActive()) {
         if (flushing) {
             flushFile.close();
@@ -52,30 +51,29 @@ void Tracker::update() {
 
     lastSentAt = millis();
 
-    double latRaw    = gps.getLatitude();
-    double lngRaw    = gps.getLongitude();
+    double latRaw = gps.getLatitude();
+    double lngRaw = gps.getLongitude();
 
     double lat = latRaw;
     double lng = lngRaw;
-    double isInvalidCoordinates = false;
+    bool isInvalidCoordinates = false;
 
     if (ENABLE_HOME_POINT_FILTERING) {
         float dist = distanceTo(latRaw, lngRaw, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
-        if (dist/1000.0f > TRACKER_HOME_RADIUS_KM) {
+        if (dist / 1000.0f > TRACKER_HOME_RADIUS_KM) {
             lat = SENDING_LAT;
             lng = SENDING_LNG;
             isInvalidCoordinates = true;
         }
     }
-    
 
-    float speed   = gps.getSpeed();
+    float speed   = isInvalidCoordinates ? 0.0 : gps.getSpeed() ;
     float bearing = gps.getBearing();
 
     if (lastBearing < 0.0f) {
         lastBearing = bearing;
     }
-    
+
     if (WiFi.status() == WL_CONNECTED) {
         if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
             startFlush();
@@ -112,38 +110,38 @@ bool Tracker::shouldSend() {
     return millis() - lastSentAt >= currentInterval();
 }
 
-String Tracker::buildUrl(double lat, double lng, float speed, float bearing, unsigned long timestamp) {
+String Tracker::buildUrl(double lat, double lng, float speed, float bearing,
+                         unsigned long timestamp, float voltage,
+                         float altitude, uint32_t satellites,
+                         float hdop, uint32_t freeKb) {
     String url = "http://";
     url += settings.getServerHost();
     url += ":";
     url += settings.getServerPort();
     url += "/?id=";
     url += TRACKER_DEVICE_ID;
-
     url += "&lat=";
     url += String(lat, 6);
     url += "&lon=";
     url += String(lng, 6);
-
     if (timestamp) {
         url += "&timestamp=";
         url += timestamp;
     }
-
     url += "&speed=";
     url += String(speed * 0.539957f, 1);
     url += "&bearing=";
     url += String(bearing, 1);
     url += "&batt=";
-    url += String(battery.getVoltage(), 2);
+    url += String(voltage, 2);
     url += "&altitude=";
-    url += String(gps.getAltitude(), 0);
+    url += String(altitude, 0);
     url += "&sat=";
-    url += String(gps.getSatellites());
+    url += String(satellites);
     url += "&hdop=";
-    url += String(gps.getHdop(), 1);
+    url += String(hdop, 1);
     url += "&free_kb=";
-    url += String((LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024);
+    url += String(freeKb);
     return url;
 }
 
@@ -153,7 +151,12 @@ void Tracker::sendToServer(double lat, double lng, float speed, float bearing, b
         timestamp = 0;
     }
 
-    String url = buildUrl(lat, lng, speed, bearing, timestamp);
+    String url = buildUrl(lat, lng, speed, bearing, timestamp,
+                          battery.getVoltage(),
+                          (float)gps.getAltitude(),
+                          gps.getSatellites(),
+                          (float)gps.getHdop(),
+                          (LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024);
 
     Serial.print("[Tracker] sending: ");
     Serial.println(url);
@@ -186,7 +189,11 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
     }
 
     unsigned long timestamp = gps.hasTime() ? gps.getUnixTime() : millis() / 1000;
-    float voltage = battery.getVoltage();
+    float voltage    = battery.getVoltage();
+    float altitude   = (float)gps.getAltitude();
+    uint32_t sats    = gps.getSatellites();
+    float hdop       = (float)gps.getHdop();
+    uint32_t freeKb  = freeBytes / 1024;
 
     File f = LittleFS.open(TRACKER_BLACKBOX_PATH, "a");
     if (!f) {
@@ -194,17 +201,16 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
         return;
     }
 
-    f.print(timestamp);
-    f.print(",");
-    f.print(String(lat, 6));
-    f.print(",");
-    f.print(String(lng, 6));
-    f.print(",");
-    f.print(String(speed, 1));
-    f.print(",");
-    f.print(String(bearing, 1));
-    f.print(",");
-    f.println(String(voltage, 2));
+    f.print(timestamp);   f.print(",");
+    f.print(String(lat, 6));   f.print(",");
+    f.print(String(lng, 6));   f.print(",");
+    f.print(String(speed, 1)); f.print(",");
+    f.print(String(bearing, 1)); f.print(",");
+    f.print(String(voltage, 2)); f.print(",");
+    f.print(String(altitude, 0)); f.print(",");
+    f.print(String(sats));  f.print(",");
+    f.print(String(hdop, 1)); f.print(",");
+    f.println(String(freeKb));
     f.close();
 
     Serial.println("[Tracker] blackbox: saved");
@@ -237,19 +243,27 @@ void Tracker::flushNextLine() {
     int i2 = line.indexOf(',', i1 + 1);
     int i3 = line.indexOf(',', i2 + 1);
     int i4 = line.indexOf(',', i3 + 1);
+    int i5 = line.indexOf(',', i4 + 1);
+    int i6 = line.indexOf(',', i5 + 1);
+    int i7 = line.indexOf(',', i6 + 1);
+    int i8 = line.indexOf(',', i7 + 1);
 
-    if (i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0 || i4 < 0) return;
+    if (i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0 || i4 < 0 ||
+        i5 < 0 || i6 < 0 || i7 < 0 || i8 < 0) return;
 
     unsigned long timestamp = line.substring(0, i0).toInt();
-    double lat    = line.substring(i0 + 1, i1).toDouble();
-    double lng    = line.substring(i1 + 1, i2).toDouble();
-    float speed   = line.substring(i2 + 1, i3).toFloat();
-    float bearing = line.substring(i3 + 1, i4).toFloat();
-    float voltage = line.substring(i4 + 1).toFloat();
+    double lat         = line.substring(i0 + 1, i1).toDouble();
+    double lng         = line.substring(i1 + 1, i2).toDouble();
+    float speed        = line.substring(i2 + 1, i3).toFloat();
+    float bearing      = line.substring(i3 + 1, i4).toFloat();
+    float voltage      = line.substring(i4 + 1, i5).toFloat();
+    float altitude     = line.substring(i5 + 1, i6).toFloat();
+    uint32_t satellites = line.substring(i6 + 1, i7).toInt();
+    float hdop         = line.substring(i7 + 1, i8).toFloat();
+    uint32_t freeKb    = line.substring(i8 + 1).toInt();
 
-    String url = buildUrl(lat, lng, speed, bearing, timestamp);
-    url += "&batt=";
-    url += String(voltage, 2);
+    String url = buildUrl(lat, lng, speed, bearing, timestamp,
+                          voltage, altitude, satellites, hdop, freeKb);
 
     HTTPClient http;
     http.setTimeout(10000);
