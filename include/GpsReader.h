@@ -32,4 +32,8 @@ private:
 
     HardwareSerial gpsSerial;
     TinyGPSPlus gps;
+
+    static constexpr uint8_t SPEED_SAMPLES = 5;
+    float speedBuffer[SPEED_SAMPLES] = {0};
+    uint8_t speedIndex = 0;
 };

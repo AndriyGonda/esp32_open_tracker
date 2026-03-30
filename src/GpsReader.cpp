@@ -53,7 +53,6 @@ double GpsReader::getAltitude() {
     return alt < 0.0 ? 0.0 : alt;
 }
 
-float GpsReader::getSpeed()         { return gps.speed.kmph(); }
 float GpsReader::getBearing()       { return gps.course.deg(); }
 double GpsReader::getHdop()         { return gps.hdop.hdop(); }
 uint32_t GpsReader::getSatellites() { return gps.satellites.value(); }
@@ -72,4 +71,16 @@ unsigned long GpsReader::getUnixTime() {
     t.tm_sec  = gps.time.second();
 
     return (unsigned long)mktime(&t);
+}
+
+float GpsReader::getSpeed() {
+    float raw = gps.speed.kmph();
+    speedBuffer[speedIndex] = raw;
+    speedIndex = (speedIndex + 1) % SPEED_SAMPLES;
+
+    float sum = 0;
+    for (uint8_t i = 0; i < SPEED_SAMPLES; i++) {
+        sum += speedBuffer[i];
+    }
+    return sum / SPEED_SAMPLES;
 }

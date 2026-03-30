@@ -1,3 +1,5 @@
+#include <time.h>
+#include <esp_timer.h>
 #include "Tracker.h"
 
 Tracker::Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led)
@@ -13,6 +15,7 @@ void Tracker::begin() {
     Serial.print("[Tracker] LittleFS total: ");
     Serial.print(LittleFS.totalBytes() / 1024);
     Serial.println(" KB");
+    syncTimeNTP();
 }
 
 void Tracker::update() {
@@ -45,6 +48,24 @@ void Tracker::update() {
         return;
     }
 
+    float speed = gps.getSpeed();
+    if (speed > TRACKER_MAX_VALID_SPEED) {
+        speed = 0.0f;
+    }
+
+    bool moving = speed >= TRACKER_SPEED_THRESHOLD;
+
+    
+    if (!moving) {
+        unsigned long now = millis();
+        if (now - lastAccumAt >= ACCUM_INTERVAL_MS) {
+            lastAccumAt = now;
+            latAccum += gps.getLatitude();
+            lngAccum += gps.getLongitude();
+            accumCount++;
+        }
+    }
+
     if (!shouldSend()) {
         return;
     }
@@ -53,13 +74,26 @@ void Tracker::update() {
 
     double latRaw = gps.getLatitude();
     double lngRaw = gps.getLongitude();
+    double lat, lng;
 
-    double lat = latRaw;
-    double lng = lngRaw;
+    if (!moving && accumCount > 0) {
+        lat = latAccum / accumCount;
+        lng = lngAccum / accumCount;
+        latAccum = 0.0;
+        lngAccum = 0.0;
+        accumCount = 0;
+    } else {
+        lat = latRaw;
+        lng = lngRaw;
+        latAccum = 0.0;
+        lngAccum = 0.0;
+        accumCount = 0;
+    }
+
     bool isInvalidCoordinates = false;
 
     if (ENABLE_HOME_POINT_FILTERING) {
-        float dist = distanceTo(latRaw, lngRaw, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
+        float dist = distanceTo(lat, lng, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
         if (dist / 1000.0f > TRACKER_HOME_RADIUS_KM) {
             lat = SENDING_LAT;
             lng = SENDING_LNG;
@@ -67,10 +101,8 @@ void Tracker::update() {
         }
     }
 
-    float speed   = isInvalidCoordinates ? 0.0 : gps.getSpeed();
-
-    if (speed > TRACKER_MAX_VALID_SPEED)  {
-        speed = 0.0;
+    if (isInvalidCoordinates) {
+        speed = 0.0f;
     }
 
     float bearing = gps.getBearing();
@@ -155,10 +187,7 @@ String Tracker::buildUrl(double lat, double lng, float speed, float bearing,
 }
 
 void Tracker::sendToServer(double lat, double lng, float speed, float bearing, bool invalid) {
-    unsigned long timestamp = gps.hasTime() ? gps.getUnixTime() : millis() / 1000;
-    if (invalid) {
-        timestamp = 0;
-    }
+    unsigned long timestamp = getSafeTimestamp(invalid);
 
     String url = buildUrl(lat, lng, speed, bearing, timestamp,
                           battery.getVoltage(),
@@ -304,4 +333,49 @@ float Tracker::distanceTo(double lat1, double lng1, double lat2, double lng2) {
               cos(radians(lat1)) * cos(radians(lat2)) *
               sin(dLng / 2) * sin(dLng / 2);
     return R * 2.0f * atan2(sqrt(a), sqrt(1.0f - a));
+}
+
+void Tracker::syncTimeNTP() {
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    configTime(0, 0, "pool.ntp.org", "time.google.com");
+
+    struct tm timeinfo;
+    unsigned long startedAt = millis();
+
+    while (!getLocalTime(&timeinfo)) {
+        if (millis() - startedAt > 5000) {
+            Serial.println("[Tracker] NTP sync failed");
+            return;
+        }
+        delay(100);
+    }
+
+    lastValidUnixTime = mktime(&timeinfo);
+    lastValidMicros = esp_timer_get_time();
+    timeSynced = true;
+
+    Serial.print("[Tracker] NTP synced: ");
+    Serial.println(lastValidUnixTime);
+}
+
+unsigned long Tracker::getSafeTimestamp(bool invalid) {
+    if (!timeSynced && WiFi.status() == WL_CONNECTED) {
+        syncTimeNTP();
+    }
+
+    unsigned long gpsTime = gps.hasTime() ? gps.getUnixTime() : 0;
+
+    if (!invalid && gpsTime > 0) {
+        lastValidUnixTime = gpsTime;
+        lastValidMicros = esp_timer_get_time();
+        return gpsTime;
+    }
+
+    if (lastValidUnixTime > 0) {
+        uint64_t elapsed = (esp_timer_get_time() - lastValidMicros) / 1000000ULL;
+        return lastValidUnixTime + (unsigned long)elapsed;
+    }
+
+    return millis() / 1000;
 }

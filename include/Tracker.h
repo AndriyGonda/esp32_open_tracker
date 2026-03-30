@@ -28,6 +28,16 @@ private:
     unsigned long lastSentAt = 0;
     float lastBearing = -1.0f;
 
+    double latAccum = 0.0;
+    double lngAccum = 0.0;
+    uint8_t accumCount = 0;
+    unsigned long lastAccumAt = 0;
+    static constexpr unsigned long ACCUM_INTERVAL_MS = 10000;
+
+    unsigned long lastValidUnixTime = 0;
+    uint64_t lastValidMicros = 0;
+    bool timeSynced = false;
+
     bool flushing = false;
     File flushFile;
 
@@ -46,4 +56,6 @@ private:
 
     float bearingDiff(float a, float b);
     float distanceTo(double lat1, double lng1, double lat2, double lng2);
+    unsigned long getSafeTimestamp(bool invalid);
+    void syncTimeNTP();
 };
