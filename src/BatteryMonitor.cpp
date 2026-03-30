@@ -20,7 +20,7 @@ float BatteryMonitor::readVoltage(uint8_t samples) const {
         delay(2);
     }
 
-    float adcMv = sumMv / (float) samples;
+    float adcMv = sumMv / (float)samples;
     float batteryVoltage = (adcMv / 1000.0f) * dividerRatio * calibrationFactor;
 
     return batteryVoltage;
@@ -31,11 +31,11 @@ float BatteryMonitor::getVoltage() const {
 }
 
 bool BatteryMonitor::isLow() const {
-    return getVoltage() <= LOW_VOLTAGE;
+    return getVoltage() <= BATTERY_LOW_VOLTAGE;
 }
 
 bool BatteryMonitor::isCritical() const {
-    return getVoltage() <= CRITICAL_VOLTAGE;
+    return getVoltage() <= BATTERY_CRITICAL_VOLTAGE;
 }
 
 void BatteryMonitor::update() {
@@ -53,9 +53,9 @@ void BatteryMonitor::update() {
     Serial.print(voltage, 3);
     Serial.println(" V");
 
-    if (voltage <= CRITICAL_VOLTAGE) {
+    if (voltage <= BATTERY_CRITICAL_VOLTAGE) {
         Serial.println("[BatteryMonitor] CRITICAL BATTERY");
-    } else if (voltage <= LOW_VOLTAGE) {
+    } else if (voltage <= BATTERY_LOW_VOLTAGE) {
         Serial.println("[BatteryMonitor] LOW BATTERY");
     }
 }

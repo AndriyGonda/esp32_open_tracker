@@ -4,12 +4,11 @@
 #include <esp_sleep.h>
 #include <WiFi.h>
 #include "BatteryMonitor.h"
+#include "TrackerConfig.h"
 
-#define POWER_LOW_BATT_V       3.2f   
-#define POWER_CRITICAL_BATT_V  2.9f   
 #define POWER_BUZZER_PIN       5
 #define POWER_BUZZER_FREQ      2800
-#define POWER_BEEP_INTERVAL_MS 30000 
+#define POWER_BEEP_INTERVAL_MS 30000
 
 class PowerManager {
 public:
