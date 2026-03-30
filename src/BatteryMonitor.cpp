@@ -26,15 +26,31 @@ float BatteryMonitor::readVoltage(uint8_t samples) const {
     return batteryVoltage;
 }
 
-float BatteryMonitor::getVoltage() const {
-    return readVoltage(READ_SAMPLES);
+float BatteryMonitor::getVoltage() {
+    float raw = readVoltage(READ_SAMPLES);
+
+    voltageBuffer[voltageIndex] = raw;
+    voltageIndex = (voltageIndex + 1) % VOLTAGE_SAMPLES;
+
+    if (voltageIndex == 0) {
+        voltageBufferFilled = true;
+    }
+
+    uint8_t count = voltageBufferFilled ? VOLTAGE_SAMPLES : voltageIndex;
+    if (count == 0) return raw;
+
+    float sum = 0;
+    for (uint8_t i = 0; i < count; i++) {
+        sum += voltageBuffer[i];
+    }
+    return sum / count;
 }
 
-bool BatteryMonitor::isLow() const {
+bool BatteryMonitor::isLow() {
     return getVoltage() <= BATTERY_LOW_VOLTAGE;
 }
 
-bool BatteryMonitor::isCritical() const {
+bool BatteryMonitor::isCritical() {
     return getVoltage() <= BATTERY_CRITICAL_VOLTAGE;
 }
 

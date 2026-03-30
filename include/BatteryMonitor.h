@@ -10,9 +10,9 @@ public:
     void begin();
     void update();
 
-    float getVoltage() const;
-    bool isLow() const;
-    bool isCritical() const;
+    float getVoltage();
+    bool isLow();
+    bool isCritical();
 
 private:
     uint8_t pin;
@@ -25,4 +25,8 @@ private:
     static constexpr uint8_t UPDATE_SAMPLES = 8;
     static constexpr uint8_t READ_SAMPLES   = 4;
     float readVoltage(uint8_t samples) const;
+    static constexpr uint8_t VOLTAGE_SAMPLES = 5;
+    float voltageBuffer[VOLTAGE_SAMPLES] = {0};
+    uint8_t voltageIndex = 0;
+    bool voltageBufferFilled = false;
 };
