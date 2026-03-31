@@ -8,7 +8,7 @@
 #define MAX_HDOP 10.0
 
 // Sending intervals
-#define TRACKER_INTERVAL_STATIC   120000   // idle
+#define TRACKER_INTERVAL_STATIC   600000   // 10 minutes idle
 #define TRACKER_INTERVAL_MOVING    10000   // moving
 #define TRACKER_INTERVAL_TURNING    2000   // rotation
 

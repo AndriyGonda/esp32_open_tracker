@@ -70,7 +70,6 @@ void setup() {
     powerManager.begin();
     gpsReader.begin();
 
-    // WiFi off by default — Tracker will manage it
     WiFi.mode(WIFI_OFF);
     Serial.println("WiFi off at startup, Tracker will connect when needed");
 
