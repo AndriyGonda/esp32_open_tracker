@@ -1,5 +1,6 @@
 #include <time.h>
 #include <esp_timer.h>
+#include <esp_wifi.h>
 #include "Tracker.h"
 
 Tracker::Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led)
@@ -18,12 +19,63 @@ void Tracker::begin() {
     syncTimeNTP();
 }
 
+bool Tracker::ensureWifi() {
+    if (WiFi.status() == WL_CONNECTED) {
+        lastWifiFailAt = 0;
+        return true;
+    }
+
+    if (lastWifiFailAt > 0 &&
+        millis() - lastWifiFailAt < WIFI_RETRY_INTERVAL_MS) {
+        Serial.println("[Tracker] WiFi skip (recent fail)");
+        return false;
+    }
+
+    Serial.println("[Tracker] WiFi on...");
+    WiFi.mode(WIFI_STA);
+    esp_wifi_set_max_tx_power(WIFI_TX_POWER);
+    WiFi.begin();
+
+    unsigned long startedAt = millis();
+    while (millis() - startedAt < 10000) {
+        if (WiFi.status() == WL_CONNECTED) {
+            wifiManagedByUs = true;
+            wifiOnAt = millis();
+            lastWifiFailAt = 0;
+            Serial.println("[Tracker] WiFi ready");
+            if (!timeSynced) syncTimeNTP();
+            return true;
+        }
+        delay(100);
+    }
+
+    Serial.println("[Tracker] WiFi connect failed");
+    lastWifiFailAt = millis();
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    return false;
+}
+
+void Tracker::releaseWifi() {
+    if (!wifiManagedByUs) return;
+
+    unsigned long onDuration = millis() - wifiOnAt;
+    Serial.print("[Tracker] WiFi off, was on for ");
+    Serial.print(onDuration);
+    Serial.println(" ms");
+
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    wifiManagedByUs = false;
+}
+
 void Tracker::update() {
     if (portal.isActive()) {
         if (flushing) {
             flushFile.close();
             flushing = false;
         }
+        wifiManagedByUs = false;
         return;
     }
 
@@ -40,6 +92,7 @@ void Tracker::update() {
     if (flushing && WiFi.status() != WL_CONNECTED) {
         flushFile.close();
         flushing = false;
+        releaseWifi();
         return;
     }
 
@@ -55,7 +108,13 @@ void Tracker::update() {
 
     bool moving = speed >= TRACKER_SPEED_THRESHOLD;
 
-    
+    static bool lastMoving = false;
+    if (moving != lastMoving) {
+        Serial.print("[Tracker] mode: ");
+        Serial.println(moving ? "MOVING" : "STATIONARY");
+        lastMoving = moving;
+    }
+
     if (!moving) {
         unsigned long now = millis();
         if (now - lastAccumAt >= ACCUM_INTERVAL_MS) {
@@ -106,22 +165,99 @@ void Tracker::update() {
     }
 
     float bearing = gps.getBearing();
-
     if (lastBearing < 0.0f) {
         lastBearing = bearing;
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
-            startFlush();
-        } else {
-            sendToServer(lat, lng, speed, bearing, isInvalidCoordinates);
+    if (moving) {
+        if (movingBufferCount < WIFI_MOVING_BATCH_SIZE) {
+            TrackPoint& p = movingBuffer[movingBufferCount++];
+            p.lat        = lat;
+            p.lng        = lng;
+            p.speed      = speed;
+            p.bearing    = bearing;
+            p.invalid    = isInvalidCoordinates;
+            p.timestamp  = getSafeTimestamp(isInvalidCoordinates);
+            p.voltage    = battery.getVoltage();
+            p.altitude   = (float)gps.getAltitude();
+            p.satellites = gps.getSatellites();
+            p.hdop       = (float)gps.getHdop();
+            p.freeKb     = (LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024;
+        }
+
+        if (movingBufferCount >= WIFI_MOVING_BATCH_SIZE) {
+            sendMovingBatch();
         }
     } else {
-        saveToBlackbox(lat, lng, speed, bearing, isInvalidCoordinates);
+        if (movingBufferCount > 0) {
+            sendMovingBatch();
+        }
+
+        if (ensureWifi()) {
+            Serial.print("[Tracker] WiFi status before send: ");
+            Serial.println(WiFi.status() == WL_CONNECTED ? "connected" : "disconnected");
+
+            if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
+                startFlush();
+            } else {
+                sendToServer(lat, lng, speed, bearing, isInvalidCoordinates);
+                releaseWifi();
+            }
+        } else {
+            saveToBlackbox(lat, lng, speed, bearing, isInvalidCoordinates);
+        }
     }
 
     lastBearing = bearing;
+}
+
+void Tracker::sendMovingBatch() {
+    if (movingBufferCount == 0) return;
+
+    if (!ensureWifi()) {
+        for (uint8_t i = 0; i < movingBufferCount; i++) {
+            TrackPoint& p = movingBuffer[i];
+            saveToBlackbox(p.lat, p.lng, p.speed, p.bearing, p.invalid);
+        }
+        movingBufferCount = 0;
+        return;
+    }
+
+    Serial.print("[Tracker] sending batch: ");
+    Serial.println(movingBufferCount);
+
+    for (uint8_t i = 0; i < movingBufferCount; i++) {
+        TrackPoint& p = movingBuffer[i];
+
+        String url = buildUrl(p.lat, p.lng, p.speed, p.bearing, p.timestamp,
+                              p.voltage, p.altitude, p.satellites, p.hdop, p.freeKb);
+
+        HTTPClient http;
+        http.setTimeout(3000);
+        http.setConnectTimeout(3000);
+        http.begin(url);
+        int code = http.GET();
+        http.end();
+
+        if (code > 0 || code == HTTPC_ERROR_READ_TIMEOUT) {
+            led.blink(1, 30, 30);
+            Serial.print("[Tracker] batch point sent: ");
+            Serial.println(i + 1);
+        } else {
+            Serial.print("[Tracker] batch point error: ");
+            Serial.println(http.errorToString(code));
+            for (uint8_t j = i; j < movingBufferCount; j++) {
+                TrackPoint& fp = movingBuffer[j];
+                saveToBlackbox(fp.lat, fp.lng, fp.speed, fp.bearing, fp.invalid);
+            }
+            break;
+        }
+
+        delay(50);
+    }
+
+    movingBufferCount = 0;
+    releaseWifi();
 }
 
 unsigned long Tracker::currentInterval() {
@@ -131,7 +267,7 @@ unsigned long Tracker::currentInterval() {
 
     float speed   = gps.getSpeed();
     float bearing = gps.getBearing();
-    
+
     if (speed > TRACKER_MAX_VALID_SPEED) {
         speed = 0.0;
     }
@@ -226,7 +362,7 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
         return;
     }
 
-    unsigned long timestamp = gps.hasTime() ? gps.getUnixTime() : millis() / 1000;
+    unsigned long timestamp = getSafeTimestamp(invalid);
     float voltage    = battery.getVoltage();
     float altitude   = (float)gps.getAltitude();
     uint32_t sats    = gps.getSatellites();
@@ -239,15 +375,15 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
         return;
     }
 
-    f.print(timestamp);   f.print(",");
+    f.print(timestamp);        f.print(",");
     f.print(String(lat, 6));   f.print(",");
     f.print(String(lng, 6));   f.print(",");
     f.print(String(speed, 1)); f.print(",");
     f.print(String(bearing, 1)); f.print(",");
     f.print(String(voltage, 2)); f.print(",");
     f.print(String(altitude, 0)); f.print(",");
-    f.print(String(sats));  f.print(",");
-    f.print(String(hdop, 1)); f.print(",");
+    f.print(String(sats));     f.print(",");
+    f.print(String(hdop, 1));  f.print(",");
     f.println(String(freeKb));
     f.close();
 
@@ -257,6 +393,7 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
 void Tracker::startFlush() {
     flushFile = LittleFS.open(TRACKER_BLACKBOX_PATH, "r");
     if (!flushFile) {
+        releaseWifi();
         return;
     }
     flushing = true;
@@ -269,6 +406,7 @@ void Tracker::flushNextLine() {
         flushing = false;
         LittleFS.remove(TRACKER_BLACKBOX_PATH);
         Serial.println("[Tracker] blackbox flushed and cleared");
+        releaseWifi();
         return;
     }
 
@@ -290,21 +428,21 @@ void Tracker::flushNextLine() {
         i5 < 0 || i6 < 0 || i7 < 0 || i8 < 0) return;
 
     unsigned long timestamp = line.substring(0, i0).toInt();
-    double lat         = line.substring(i0 + 1, i1).toDouble();
-    double lng         = line.substring(i1 + 1, i2).toDouble();
-    float speed        = line.substring(i2 + 1, i3).toFloat();
-    float bearing      = line.substring(i3 + 1, i4).toFloat();
-    float voltage      = line.substring(i4 + 1, i5).toFloat();
-    float altitude     = line.substring(i5 + 1, i6).toFloat();
+    double lat          = line.substring(i0 + 1, i1).toDouble();
+    double lng          = line.substring(i1 + 1, i2).toDouble();
+    float speed         = line.substring(i2 + 1, i3).toFloat();
+    float bearing       = line.substring(i3 + 1, i4).toFloat();
+    float voltage       = line.substring(i4 + 1, i5).toFloat();
+    float altitude      = line.substring(i5 + 1, i6).toFloat();
     uint32_t satellites = line.substring(i6 + 1, i7).toInt();
-    float hdop         = line.substring(i7 + 1, i8).toFloat();
-    uint32_t freeKb    = line.substring(i8 + 1).toInt();
+    float hdop          = line.substring(i7 + 1, i8).toFloat();
+    uint32_t freeKb     = line.substring(i8 + 1).toInt();
 
     String url = buildUrl(lat, lng, speed, bearing, timestamp,
                           voltage, altitude, satellites, hdop, freeKb);
 
     HTTPClient http;
-    http.setTimeout(10000);
+    http.setTimeout(5000);
     http.setConnectTimeout(5000);
     http.begin(url);
     int code = http.GET();
@@ -393,4 +531,14 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
     }
 
     return millis() / 1000;
+}
+
+void Tracker::forceReleaseWifi() {
+    if (flushing) {
+        flushFile.close();
+        flushing = false;
+    }
+    movingBufferCount = 0;
+    wifiManagedByUs = false;
+    Serial.println("[Tracker] WiFi force released for portal");
 }

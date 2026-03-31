@@ -37,3 +37,9 @@
 /*BATTERY MANAGEMENT */
 #define BATTERY_LOW_VOLTAGE       3.5f
 #define BATTERY_CRITICAL_VOLTAGE  3.0f
+
+
+// WiFi power management
+#define WIFI_TX_POWER             52       // ~13 dBm
+#define WIFI_MOVING_BATCH_SIZE    10       // max points in moving batch
+#define WIFI_RETRY_INTERVAL_MS    300000   // 5 min between retries after fail

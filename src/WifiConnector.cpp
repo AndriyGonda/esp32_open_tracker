@@ -24,6 +24,30 @@ WifiConnector::WifiConnector(AppSettings& settings, LedController& led, ConfigPo
     : settings(settings), led(led), portal(portal) {
 }
 
+void WifiConnector::storeCredentials() {
+    uint8_t count = settings.getWifiCount();
+    if (count == 0) {
+        Serial.println("[WifiConnector] no credentials to store");
+        return;
+    }
+
+    auto wifi = settings.getWifi(0);
+    String ssid = wifi.ssid;
+    ssid.trim();
+    if (ssid.isEmpty()) return;
+
+    WiFi.persistent(true);
+    WiFi.setSleep(false);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), wifi.password.c_str());
+    delay(100);
+    WiFi.disconnect(false, false);
+    WiFi.mode(WIFI_OFF);
+
+    Serial.print("[WifiConnector] credentials stored for: ");
+    Serial.println(ssid);
+}
+
 bool WifiConnector::connectToFirstAvailableSavedNetwork() {
     uint8_t count = settings.getWifiCount();
 
@@ -119,6 +143,11 @@ void WifiConnector::update() {
         return;
     }
 
+    // do not interfere when WiFi is intentionally off (managed by Tracker)
+    if (WiFi.getMode() == WIFI_OFF) {
+        return;
+    }
+
     if (WiFi.status() == WL_CONNECTED) {
         reconnecting = false;
         return;
@@ -177,7 +206,7 @@ void WifiConnector::checkReconnect() {
                     status == WL_CONNECTION_LOST;
 
     if (!timedOut && !failed) {
-        return;  
+        return;
     }
 
     reconnectIndex++;

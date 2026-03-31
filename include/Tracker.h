@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <LittleFS.h>
+#include <esp_wifi.h>
 #include "GpsReader.h"
 #include "AppSettings.h"
 #include "BatteryMonitor.h"
@@ -11,12 +12,27 @@
 #include "LedController.h"
 #include "TrackerConfig.h"
 
+struct TrackPoint {
+    double lat;
+    double lng;
+    float speed;
+    float bearing;
+    bool invalid;
+    unsigned long timestamp;
+    float voltage;
+    float altitude;
+    uint32_t satellites;
+    float hdop;
+    uint32_t freeKb;
+};
+
 class Tracker {
 public:
     Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led);
 
     void begin();
     void update();
+    void forceReleaseWifi();
 
 private:
     GpsReader& gps;
@@ -41,6 +57,17 @@ private:
 
     bool flushing = false;
     File flushFile;
+
+    TrackPoint movingBuffer[WIFI_MOVING_BATCH_SIZE];
+    uint8_t movingBufferCount = 0;
+
+    bool wifiManagedByUs = false;
+    unsigned long wifiOnAt = 0;
+    unsigned long lastWifiFailAt = 0;
+
+    bool ensureWifi();
+    void releaseWifi();
+    void sendMovingBatch();
 
     unsigned long currentInterval();
     bool shouldSend();

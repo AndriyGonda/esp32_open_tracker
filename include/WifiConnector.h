@@ -11,6 +11,7 @@ public:
     WifiConnector(AppSettings& settings, LedController& led, ConfigPortal& portal);
 
     bool connectToFirstAvailableSavedNetwork();
+    void storeCredentials();
     void update();
     void markLastReconnectNow();
 
