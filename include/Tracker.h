@@ -12,19 +12,9 @@
 #include "LedController.h"
 #include "TrackerConfig.h"
 
-struct TrackPoint {
-    double lat;
-    double lng;
-    float speed;
-    float bearing;
-    bool invalid;
-    unsigned long timestamp;
-    float voltage;
-    float altitude;
-    uint32_t satellites;
-    float hdop;
-    uint32_t freeKb;
-};
+#if ENABLE_WIFI_POSITIONING
+#include "WifiPositioning.h"
+#endif
 
 class Tracker {
 public:
@@ -44,11 +34,6 @@ private:
     unsigned long lastSentAt = 0;
     float lastBearing = -1.0f;
 
-    double latAccum = 0.0;
-    double lngAccum = 0.0;
-    uint8_t accumCount = 0;
-    unsigned long lastAccumAt = 0;
-    static constexpr unsigned long ACCUM_INTERVAL_MS = 10000;
     static constexpr unsigned long ONE_YEAR_SECONDS = 365UL * 24 * 3600;
 
     unsigned long lastValidUnixTime = 0;
@@ -58,16 +43,17 @@ private:
     bool flushing = false;
     File flushFile;
 
-    TrackPoint movingBuffer[WIFI_MOVING_BATCH_SIZE];
-    uint8_t movingBufferCount = 0;
-
     bool wifiManagedByUs = false;
     unsigned long wifiOnAt = 0;
     unsigned long lastWifiFailAt = 0;
+    bool lastConnectSuccess = false;
+
+#if ENABLE_WIFI_POSITIONING
+    WifiPositioning wifiPositioning;
+#endif
 
     bool ensureWifi();
     void releaseWifi();
-    void sendMovingBatch();
 
     unsigned long currentInterval();
     bool shouldSend();

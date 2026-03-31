@@ -8,7 +8,7 @@
 #define MAX_HDOP 10.0
 
 // Sending intervals
-#define TRACKER_INTERVAL_STATIC   600000   // 10 minutes idle
+#define TRACKER_INTERVAL_STATIC   60000   // 10 minutes idle
 #define TRACKER_INTERVAL_MOVING    10000   // moving
 #define TRACKER_INTERVAL_TURNING    2000   // rotation
 
@@ -42,4 +42,7 @@
 // WiFi power management
 #define WIFI_TX_POWER             52       // ~13 dBm
 #define WIFI_MOVING_BATCH_SIZE    10       // max points in moving batch
-#define WIFI_RETRY_INTERVAL_MS    300000   // 5 min between retries after fail
+#define WIFI_RETRY_INTERVAL_MS    60000   // 1 min between retries after fail
+
+// WiFi positioning via beacondb.net (requires WiFi connection)
+#define ENABLE_WIFI_POSITIONING false

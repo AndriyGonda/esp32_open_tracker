@@ -27,30 +27,62 @@ bool Tracker::ensureWifi() {
 
     if (lastWifiFailAt > 0 &&
         millis() - lastWifiFailAt < WIFI_RETRY_INTERVAL_MS) {
-        Serial.println("[Tracker] WiFi skip (recent fail)");
+        Serial.print("[Tracker] WiFi skip (recent fail), retry in ");
+        Serial.print((WIFI_RETRY_INTERVAL_MS - (millis() - lastWifiFailAt)) / 1000);
+        Serial.println(" sec");
         return false;
     }
 
     Serial.println("[Tracker] WiFi on...");
     WiFi.mode(WIFI_STA);
     esp_wifi_set_max_tx_power(WIFI_TX_POWER);
-    WiFi.begin();
 
-    unsigned long startedAt = millis();
-    while (millis() - startedAt < 10000) {
-        if (WiFi.status() == WL_CONNECTED) {
-            wifiManagedByUs = true;
-            wifiOnAt = millis();
-            lastWifiFailAt = 0;
-            Serial.println("[Tracker] WiFi ready");
-            if (!timeSynced) syncTimeNTP();
-            return true;
+    uint8_t count = settings.getWifiCount();
+    bool connected = false;
+
+    for (uint8_t i = 0; i < count && !connected; i++) {
+        auto wifi = settings.getWifi(i);
+        String ssid = wifi.ssid;
+        ssid.trim();
+        if (ssid.isEmpty()) continue;
+
+        Serial.print("[Tracker] trying: ");
+        Serial.println(ssid);
+
+        WiFi.begin(ssid.c_str(), wifi.password.c_str());
+
+        unsigned long startedAt = millis();
+        while (millis() - startedAt < 10000) {
+            if (WiFi.status() == WL_CONNECTED) {
+                connected = true;
+                break;
+            }
+            if (WiFi.status() == WL_CONNECT_FAILED ||
+                WiFi.status() == WL_NO_SSID_AVAIL) {
+                break;
+            }
+            delay(100);
         }
-        delay(100);
+
+        if (!connected) {
+            WiFi.disconnect(false, false);
+            delay(200);
+        }
+    }
+
+    if (connected) {
+        wifiManagedByUs = true;
+        wifiOnAt = millis();
+        lastWifiFailAt = 0;
+        lastConnectSuccess = true;
+        Serial.println("[Tracker] WiFi ready");
+        if (!timeSynced) syncTimeNTP();
+        return true;
     }
 
     Serial.println("[Tracker] WiFi connect failed");
     lastWifiFailAt = millis();
+    lastConnectSuccess = false;
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
     return false;
@@ -112,17 +144,13 @@ void Tracker::update() {
     if (moving != lastMoving) {
         Serial.print("[Tracker] mode: ");
         Serial.println(moving ? "MOVING" : "STATIONARY");
-        lastMoving = moving;
-    }
 
-    if (!moving) {
-        unsigned long now = millis();
-        if (now - lastAccumAt >= ACCUM_INTERVAL_MS) {
-            lastAccumAt = now;
-            latAccum += gps.getLatitude();
-            lngAccum += gps.getLongitude();
-            accumCount++;
+        // switched to stationary — release WiFi if it was kept alive
+        if (!moving && wifiManagedByUs) {
+            releaseWifi();
         }
+
+        lastMoving = moving;
     }
 
     if (!shouldSend()) {
@@ -131,32 +159,38 @@ void Tracker::update() {
 
     lastSentAt = millis();
 
-    double latRaw = gps.getLatitude();
-    double lngRaw = gps.getLongitude();
-    double lat, lng;
-
-    if (!moving && accumCount > 0) {
-        lat = latAccum / accumCount;
-        lng = lngAccum / accumCount;
-        latAccum = 0.0;
-        lngAccum = 0.0;
-        accumCount = 0;
-    } else {
-        lat = latRaw;
-        lng = lngRaw;
-        latAccum = 0.0;
-        lngAccum = 0.0;
-        accumCount = 0;
-    }
-
+    double lat = gps.getLatitude();
+    double lng = gps.getLongitude();
     bool isInvalidCoordinates = false;
 
     if (ENABLE_HOME_POINT_FILTERING) {
         float dist = distanceTo(lat, lng, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
         if (dist / 1000.0f > TRACKER_HOME_RADIUS_KM) {
+#if ENABLE_WIFI_POSITIONING
+            Serial.println("[Tracker] coordinates outside home zone, trying WiFi positioning...");
+            if (ensureWifi()) {
+                WifiPosition wpos = wifiPositioning.locate();
+                if (wpos.valid) {
+                    Serial.print("[Tracker] WiFi position found, accuracy=");
+                    Serial.println(wpos.accuracy);
+                    lat = wpos.lat;
+                    lng = wpos.lng;
+                } else {
+                    Serial.println("[Tracker] WiFi positioning failed, using fallback");
+                    lat = SENDING_LAT;
+                    lng = SENDING_LNG;
+                    isInvalidCoordinates = true;
+                }
+            } else {
+                lat = SENDING_LAT;
+                lng = SENDING_LNG;
+                isInvalidCoordinates = true;
+            }
+#else
             lat = SENDING_LAT;
             lng = SENDING_LNG;
             isInvalidCoordinates = true;
+#endif
         }
     }
 
@@ -170,29 +204,24 @@ void Tracker::update() {
     }
 
     if (moving) {
-        if (movingBufferCount < WIFI_MOVING_BATCH_SIZE) {
-            TrackPoint& p = movingBuffer[movingBufferCount++];
-            p.lat        = lat;
-            p.lng        = lng;
-            p.speed      = speed;
-            p.bearing    = bearing;
-            p.invalid    = isInvalidCoordinates;
-            p.timestamp  = getSafeTimestamp(isInvalidCoordinates);
-            p.voltage    = battery.getVoltage();
-            p.altitude   = (float)gps.getAltitude();
-            p.satellites = gps.getSatellites();
-            p.hdop       = (float)gps.getHdop();
-            p.freeKb     = (LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024;
+        // while moving — keep WiFi alive if last connection was successful
+        if (lastConnectSuccess) {
+            if (WiFi.status() != WL_CONNECTED) {
+                ensureWifi();
+            }
         }
 
-        if (movingBufferCount >= WIFI_MOVING_BATCH_SIZE) {
-            sendMovingBatch();
+        if (WiFi.status() == WL_CONNECTED) {
+            if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
+                startFlush();
+            } else {
+                sendToServer(lat, lng, speed, bearing, isInvalidCoordinates);
+                // do NOT release WiFi while moving
+            }
+        } else {
+            saveToBlackbox(lat, lng, speed, bearing, isInvalidCoordinates);
         }
     } else {
-        if (movingBufferCount > 0) {
-            sendMovingBatch();
-        }
-
         if (ensureWifi()) {
             Serial.print("[Tracker] WiFi status before send: ");
             Serial.println(WiFi.status() == WL_CONNECTED ? "connected" : "disconnected");
@@ -209,55 +238,6 @@ void Tracker::update() {
     }
 
     lastBearing = bearing;
-}
-
-void Tracker::sendMovingBatch() {
-    if (movingBufferCount == 0) return;
-
-    if (!ensureWifi()) {
-        for (uint8_t i = 0; i < movingBufferCount; i++) {
-            TrackPoint& p = movingBuffer[i];
-            saveToBlackbox(p.lat, p.lng, p.speed, p.bearing, p.invalid);
-        }
-        movingBufferCount = 0;
-        return;
-    }
-
-    Serial.print("[Tracker] sending batch: ");
-    Serial.println(movingBufferCount);
-
-    for (uint8_t i = 0; i < movingBufferCount; i++) {
-        TrackPoint& p = movingBuffer[i];
-
-        String url = buildUrl(p.lat, p.lng, p.speed, p.bearing, p.timestamp,
-                              p.voltage, p.altitude, p.satellites, p.hdop, p.freeKb);
-
-        HTTPClient http;
-        http.setTimeout(3000);
-        http.setConnectTimeout(3000);
-        http.begin(url);
-        int code = http.GET();
-        http.end();
-
-        if (code > 0 || code == HTTPC_ERROR_READ_TIMEOUT) {
-            led.blink(1, 30, 30);
-            Serial.print("[Tracker] batch point sent: ");
-            Serial.println(i + 1);
-        } else {
-            Serial.print("[Tracker] batch point error: ");
-            Serial.println(http.errorToString(code));
-            for (uint8_t j = i; j < movingBufferCount; j++) {
-                TrackPoint& fp = movingBuffer[j];
-                saveToBlackbox(fp.lat, fp.lng, fp.speed, fp.bearing, fp.invalid);
-            }
-            break;
-        }
-
-        delay(50);
-    }
-
-    movingBufferCount = 0;
-    releaseWifi();
 }
 
 unsigned long Tracker::currentInterval() {
@@ -375,15 +355,15 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
         return;
     }
 
-    f.print(timestamp);        f.print(",");
-    f.print(String(lat, 6));   f.print(",");
-    f.print(String(lng, 6));   f.print(",");
-    f.print(String(speed, 1)); f.print(",");
+    f.print(timestamp);          f.print(",");
+    f.print(String(lat, 6));     f.print(",");
+    f.print(String(lng, 6));     f.print(",");
+    f.print(String(speed, 1));   f.print(",");
     f.print(String(bearing, 1)); f.print(",");
     f.print(String(voltage, 2)); f.print(",");
     f.print(String(altitude, 0)); f.print(",");
-    f.print(String(sats));     f.print(",");
-    f.print(String(hdop, 1));  f.print(",");
+    f.print(String(sats));       f.print(",");
+    f.print(String(hdop, 1));    f.print(",");
     f.println(String(freeKb));
     f.close();
 
@@ -538,7 +518,7 @@ void Tracker::forceReleaseWifi() {
         flushFile.close();
         flushing = false;
     }
-    movingBufferCount = 0;
     wifiManagedByUs = false;
+    lastConnectSuccess = false;
     Serial.println("[Tracker] WiFi force released for portal");
 }
