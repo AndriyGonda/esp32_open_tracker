@@ -41,7 +41,6 @@
 
 // WiFi power management
 #define WIFI_TX_POWER             52       // TX_POWER * 0.25  dBm 
-#define WIFI_MOVING_BATCH_SIZE    10       // max points in moving batch
 #define WIFI_RETRY_INTERVAL_MS    60000   // 2 min between retries after fail
 
 // WiFi positioning via beacondb.net (requires WiFi connection)
