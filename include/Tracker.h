@@ -18,9 +18,7 @@
 
 class Tracker {
 public:
-    Tracker(GpsReader& gps, AppSettings& settings,
-            BatteryMonitor& battery, ConfigPortal& portal,
-            LedController& led);
+    Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led);
 
     void begin();
     void update();
@@ -48,7 +46,7 @@ private:
     bool          wifiManagedByUs    = false;
     unsigned long wifiOnAt           = 0;
     unsigned long lastWifiFailAt     = 0;
-    bool          lastConnectSuccess  = false;
+    bool          lastConnectSuccess = false;
 
 #if ENABLE_WIFI_POSITIONING
     WifiPositioning wifiPositioning;
@@ -62,10 +60,15 @@ private:
     uint8_t _speedWindowIdx  = 0;
     bool    _speedWindowFull = false;
 
+    // Position-pinning state
     bool          _pinned          = false;
     double        _pinLat          = 0.0;
     double        _pinLng          = 0.0;
     unsigned long _stationarySince = 0;
+
+    // Acceleration check state
+    unsigned long _lastParkingUpdateMs = 0;
+    unsigned long _lastIntervalMs      = TRACKER_INTERVAL_STATIC;
 
     void parkingFilterUpdate(float speed);
     bool parkingIsMoving() const;
@@ -74,10 +77,8 @@ private:
     unsigned long currentInterval();
     bool shouldSend();
 
-    void sendToServer(double lat, double lng, float speed,
-                       float bearing, bool invalid);
-    void saveToBlackbox(double lat, double lng, float speed,
-                         float bearing, bool invalid);
+    void sendToServer(double lat, double lng, float speed, float bearing, bool invalid);
+    void saveToBlackbox(double lat, double lng, float speed, float bearing, bool invalid);
     void startFlush();
     void flushNextLine();
 
@@ -87,8 +88,7 @@ private:
                     float hdop, uint32_t freeKb);
 
     float         bearingDiff(float a, float b);
-    float         distanceTo(double lat1, double lng1,
-                               double lat2, double lng2);
+    float         distanceTo(double lat1, double lng1, double lat2, double lng2);
     unsigned long getSafeTimestamp(bool invalid);
     void          syncTimeNTP();
 };
