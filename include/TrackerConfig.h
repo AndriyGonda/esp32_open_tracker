@@ -45,3 +45,18 @@
 
 // WiFi positioning via beacondb.net (requires WiFi connection)
 #define ENABLE_WIFI_POSITIONING false
+
+#define ENABLE_PARKING_FILTER         true
+
+// --- Position pinning ---
+// Seconds the device must remain stationary before the anchor is set.
+#define PARKING_PIN_DELAY_SEC         30
+// Maximum drift (metres) allowed while pinned.
+#define PARKING_PIN_RADIUS_M          15.0f
+
+// --- Motion consensus (sliding window) ---
+// How many consecutive GPS readings to keep in the window.
+#define PARKING_WINDOW_SIZE           5
+// How many of those readings must show speed >= TRACKER_SPEED_THRESHOLD
+// before the tracker accepts "moving" state.
+#define PARKING_MOTION_MIN_MOVING     3
