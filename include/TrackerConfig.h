@@ -5,7 +5,7 @@
 
 
 // Max valid hdop for tracker
-#define MAX_HDOP 10.0
+#define MAX_HDOP 3.0
 
 // Sending intervals
 #define TRACKER_INTERVAL_STATIC   120000   // 2 minutes idle
@@ -50,14 +50,17 @@
 
 // --- Position pinning ---
 // Seconds the device must remain stationary before the anchor is set.
-#define PARKING_PIN_DELAY_SEC         30
-// Maximum drift (metres) allowed while pinned.
-#define PARKING_PIN_RADIUS_M          15.0f
+#define PARKING_PIN_DELAY_SEC         120
+
+// Maximum drift (meters) allowed while pinned.
+#define PARKING_PIN_RADIUS_M          5.0f
+
 
 // --- Motion consensus (sliding window) ---
 // How many consecutive GPS readings to keep in the window.
 #define PARKING_WINDOW_SIZE           5
-// How many of those readings must show speed >= TRACKER_SPEED_THRESHOLD
+
+
 // before the tracker accepts "moving" state.
 #define PARKING_MOTION_MIN_MOVING     3
-#define PARKING_MAX_ACCELERATION  2.0f 
+#define PARKING_MAX_ACCELERATION  3.5f 
