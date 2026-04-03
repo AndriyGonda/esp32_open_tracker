@@ -467,16 +467,12 @@ bool Tracker::parkingIsMoving() const {
         return gps.getSpeed() >= TRACKER_SPEED_THRESHOLD;
     }
 
-    // Consensus: скільки точок у вікні перевищують поріг швидкості
     uint8_t movingCount = 0;
     for (uint8_t i = 0; i < total; i++) {
         if (_speedWindow[i] >= TRACKER_SPEED_THRESHOLD) movingCount++;
     }
     if (movingCount < PARKING_MOTION_MIN_MOVING) return false;
 
-    // Acceleration check: порівнюємо дві останні точки у вікні.
-    // Індекси йдуть у зворотному порядку відносно _speedWindowIdx,
-    // бо останній записаний елемент стоїть на (_speedWindowIdx - 1).
     uint8_t idxCurr = (_speedWindowIdx + PARKING_WINDOW_SIZE - 1) % PARKING_WINDOW_SIZE;
     uint8_t idxPrev = (_speedWindowIdx + PARKING_WINDOW_SIZE - 2) % PARKING_WINDOW_SIZE;
 
@@ -564,6 +560,11 @@ float Tracker::distanceTo(double lat1, double lng1, double lat2, double lng2) {
 void Tracker::syncTimeNTP() {
     if (WiFi.status() != WL_CONNECTED) return;
 
+    // fetch timezone offset if not yet synced
+    if (!timezoneSync.isSynced()) {
+        timezoneSync.fetch();
+    }
+
     configTime(0, 0, "pool.ntp.org", "time.google.com");
 
     struct tm timeinfo;
@@ -577,12 +578,14 @@ void Tracker::syncTimeNTP() {
         delay(100);
     }
 
-    lastValidUnixTime = mktime(&timeinfo);
-    lastValidMicros = esp_timer_get_time();
+    lastValidUnixTime = mktime(&timeinfo) + timezoneSync.getOffsetSec();
     timeSynced = true;
 
     Serial.print("[Tracker] NTP synced: ");
-    Serial.println(lastValidUnixTime);
+    Serial.print(lastValidUnixTime);
+    Serial.print(" (offset=");
+    Serial.print(timezoneSync.getOffsetSec());
+    Serial.println(")");
 }
 
 unsigned long Tracker::getSafeTimestamp(bool invalid) {
@@ -602,7 +605,6 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
 
             if (!tooOld && !tooFarInFuture) {
                 lastValidUnixTime = gpsTime;
-                lastValidMicros = esp_timer_get_time();
                 return gpsTime;
             }
 
@@ -613,9 +615,12 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
         Serial.println("[Tracker] GPS time untrusted (spoofing)");
     }
 
-    if (lastValidUnixTime > 0) {
-        uint64_t elapsed = (esp_timer_get_time() - lastValidMicros) / 1000000ULL;
-        return lastValidUnixTime + (unsigned long)elapsed;
+    // use ESP32 system clock (keeps ticking after NTP sync)
+    if (timeSynced) {
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+            return (unsigned long)mktime(&timeinfo) + timezoneSync.getOffsetSec();
+        }
     }
 
     return millis() / 1000;

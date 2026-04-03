@@ -11,6 +11,7 @@
 #include "ConfigPortal.h"
 #include "LedController.h"
 #include "TrackerConfig.h"
+#include "TimezoneSync.h"
 
 #if ENABLE_WIFI_POSITIONING
 #include "WifiPositioning.h"
@@ -30,6 +31,7 @@ private:
     BatteryMonitor& battery;
     ConfigPortal&   portal;
     LedController&  led;
+    TimezoneSync timezoneSync;
 
     unsigned long lastSentAt  = 0;
     float         lastBearing = -1.0f;
@@ -37,7 +39,6 @@ private:
     static constexpr unsigned long ONE_YEAR_SECONDS = 365UL * 24 * 3600;
 
     unsigned long lastValidUnixTime = 0;
-    uint64_t      lastValidMicros   = 0;
     bool          timeSynced        = false;
 
     bool flushing  = false;
