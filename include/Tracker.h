@@ -17,6 +17,14 @@
 #include "WifiPositioning.h"
 #endif
 
+#if ENABLE_IMU
+#include "ImuReader.h"
+#endif
+
+#define FUSION_OR   0
+#define FUSION_AND  1
+#define FUSION_IMU  2
+
 class Tracker {
 public:
     Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led);
@@ -31,7 +39,7 @@ private:
     BatteryMonitor& battery;
     ConfigPortal&   portal;
     LedController&  led;
-    TimezoneSync timezoneSync;
+    TimezoneSync    timezoneSync;
 
     unsigned long lastSentAt  = 0;
     float         lastBearing = -1.0f;
@@ -51,6 +59,11 @@ private:
 
 #if ENABLE_WIFI_POSITIONING
     WifiPositioning wifiPositioning;
+#endif
+
+#if ENABLE_IMU
+    ImuReader imu{IMU_SDA_PIN, IMU_SCL_PIN};
+    bool imuMoving() const;
 #endif
 
     bool ensureWifi();
@@ -78,15 +91,17 @@ private:
     unsigned long currentInterval();
     bool shouldSend();
 
-    void sendToServer(double lat, double lng, float speed, float bearing, bool invalid);
-    void saveToBlackbox(double lat, double lng, float speed, float bearing, bool invalid);
+    void sendToServer(double lat, double lng, float speed, float bearing,
+                      float accel, bool invalid);
+    void saveToBlackbox(double lat, double lng, float speed, float bearing,
+                        float accel, bool invalid);
     void startFlush();
     void flushNextLine();
 
     String buildUrl(double lat, double lng, float speed, float bearing,
                     unsigned long timestamp, float voltage,
                     float altitude, uint32_t satellites,
-                    float hdop, uint32_t freeKb);
+                    float hdop, uint32_t freeKb, float accel);
 
     float         bearingDiff(float a, float b);
     float         distanceTo(double lat1, double lng1, double lat2, double lng2);

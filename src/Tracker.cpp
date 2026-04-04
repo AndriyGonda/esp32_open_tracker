@@ -16,6 +16,16 @@ void Tracker::begin() {
     Serial.print("[Tracker] LittleFS total: ");
     Serial.print(LittleFS.totalBytes() / 1024);
     Serial.println(" KB");
+
+#if ENABLE_IMU
+    if (imu.begin()) {
+        imu.setThreshold(IMU_ACCEL_THRESHOLD);
+        Serial.println("[Tracker] IMU ready");
+    } else {
+        Serial.println("[Tracker] IMU init failed – continuing without IMU");
+    }
+#endif
+
     syncTimeNTP();
 }
 
@@ -115,12 +125,6 @@ void Tracker::update() {
         return;
     }
 
-    if (gps.getHdop() > MAX_HDOP) {
-        Serial.print("[Tracker] poor HDOP: ");
-        Serial.println(gps.getHdop());
-        return;
-    }
-
     if (flushing && WiFi.status() != WL_CONNECTED) {
         flushFile.close();
         flushing = false;
@@ -138,11 +142,33 @@ void Tracker::update() {
         speed = 0.0f;
     }
 
+#if ENABLE_IMU
+    imu.update();
+
+    static unsigned long lastImuPrint = 0;
+    if (millis() - lastImuPrint >= 2000) {
+        lastImuPrint = millis();
+        Serial.printf("[IMU] accel=%.3f m/s²  motion=%s\n",
+            imu.getAccelMag(),
+            imu.isMoving() ? "YES" : "NO");
+    }
+#endif
+
 #if ENABLE_PARKING_FILTER
     parkingFilterUpdate(speed);
-    bool moving = parkingIsMoving();
+    bool gpsMoving = parkingIsMoving();
 #else
-    bool moving = speed >= TRACKER_SPEED_THRESHOLD;
+    bool gpsMoving = speed >= TRACKER_SPEED_THRESHOLD;
+#endif
+
+#if ENABLE_IMU
+    bool _imuSays = imu.isMoving();
+    bool moving;
+    if (IMU_FUSION_STRATEGY == FUSION_AND) moving = gpsMoving && _imuSays;
+    if (IMU_FUSION_STRATEGY == FUSION_OR)  moving = gpsMoving || _imuSays;
+    if (IMU_FUSION_STRATEGY == FUSION_IMU) moving = _imuSays;
+#else
+    bool moving = gpsMoving;
 #endif
 
     static bool lastMoving = false;
@@ -211,6 +237,12 @@ void Tracker::update() {
         lastBearing = bearing;
     }
 
+#if ENABLE_IMU
+    float accel = imu.getAccelMag();
+#else
+    float accel = 0.0f;
+#endif
+
     if (moving) {
         if (lastConnectSuccess) {
             if (WiFi.status() != WL_CONNECTED) {
@@ -222,10 +254,10 @@ void Tracker::update() {
             if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
                 startFlush();
             } else {
-                sendToServer(lat, lng, speed, bearing, isInvalidCoordinates);
+                sendToServer(lat, lng, speed, bearing, accel, isInvalidCoordinates);
             }
         } else {
-            saveToBlackbox(lat, lng, speed, bearing, isInvalidCoordinates);
+            saveToBlackbox(lat, lng, speed, bearing, accel, isInvalidCoordinates);
         }
     } else {
         if (ensureWifi()) {
@@ -235,11 +267,11 @@ void Tracker::update() {
             if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
                 startFlush();
             } else {
-                sendToServer(lat, lng, speed, bearing, isInvalidCoordinates);
+                sendToServer(lat, lng, speed, bearing, accel, isInvalidCoordinates);
                 releaseWifi();
             }
         } else {
-            saveToBlackbox(lat, lng, speed, bearing, isInvalidCoordinates);
+            saveToBlackbox(lat, lng, speed, bearing, accel, isInvalidCoordinates);
         }
     }
 
@@ -276,7 +308,7 @@ bool Tracker::shouldSend() {
 String Tracker::buildUrl(double lat, double lng, float speed, float bearing,
                          unsigned long timestamp, float voltage,
                          float altitude, uint32_t satellites,
-                         float hdop, uint32_t freeKb) {
+                         float hdop, uint32_t freeKb, float accel) {
     String url = "http://";
     url += settings.getServerHost();
     url += ":";
@@ -305,10 +337,13 @@ String Tracker::buildUrl(double lat, double lng, float speed, float bearing,
     url += String(hdop, 1);
     url += "&free_kb=";
     url += String(freeKb);
+    url += "&accel=";
+    url += String(accel, 3);
     return url;
 }
 
-void Tracker::sendToServer(double lat, double lng, float speed, float bearing, bool invalid) {
+void Tracker::sendToServer(double lat, double lng, float speed, float bearing,
+                           float accel, bool invalid) {
     unsigned long timestamp = getSafeTimestamp(invalid);
 
     String url = buildUrl(lat, lng, speed, bearing, timestamp,
@@ -316,7 +351,8 @@ void Tracker::sendToServer(double lat, double lng, float speed, float bearing, b
                           (float)gps.getAltitude(),
                           gps.getSatellites(),
                           (float)gps.getHdop(),
-                          (LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024);
+                          (LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024,
+                          accel);
 
     Serial.print("[Tracker] sending: ");
     Serial.println(url);
@@ -336,11 +372,12 @@ void Tracker::sendToServer(double lat, double lng, float speed, float bearing, b
     } else {
         Serial.print("[Tracker] HTTP error: ");
         Serial.println(http.errorToString(code));
-        saveToBlackbox(lat, lng, speed, bearing, invalid);
+        saveToBlackbox(lat, lng, speed, bearing, accel, invalid);
     }
 }
 
-void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing, bool invalid) {
+void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
+                             float accel, bool invalid) {
     size_t freeBytes = LittleFS.totalBytes() - LittleFS.usedBytes();
 
     if (freeBytes < TRACKER_BLACKBOX_MIN_FREE) {
@@ -370,7 +407,8 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
     f.print(String(altitude, 0)); f.print(",");
     f.print(String(sats));        f.print(",");
     f.print(String(hdop, 1));     f.print(",");
-    f.println(String(freeKb));
+    f.print(String(freeKb));      f.print(",");
+    f.println(String(accel, 3));
     f.close();
 
     Serial.println("[Tracker] blackbox: saved");
@@ -409,9 +447,10 @@ void Tracker::flushNextLine() {
     int i6 = line.indexOf(',', i5 + 1);
     int i7 = line.indexOf(',', i6 + 1);
     int i8 = line.indexOf(',', i7 + 1);
+    int i9 = line.indexOf(',', i8 + 1);
 
     if (i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0 || i4 < 0 ||
-        i5 < 0 || i6 < 0 || i7 < 0 || i8 < 0) return;
+        i5 < 0 || i6 < 0 || i7 < 0 || i8 < 0 || i9 < 0) return;
 
     unsigned long timestamp = line.substring(0, i0).toInt();
     double lat          = line.substring(i0 + 1, i1).toDouble();
@@ -422,10 +461,11 @@ void Tracker::flushNextLine() {
     float altitude      = line.substring(i5 + 1, i6).toFloat();
     uint32_t satellites = line.substring(i6 + 1, i7).toInt();
     float hdop          = line.substring(i7 + 1, i8).toFloat();
-    uint32_t freeKb     = line.substring(i8 + 1).toInt();
+    uint32_t freeKb     = line.substring(i8 + 1, i9).toInt();
+    float accel         = line.substring(i9 + 1).toFloat();
 
     String url = buildUrl(lat, lng, speed, bearing, timestamp,
-                          voltage, altitude, satellites, hdop, freeKb);
+                          voltage, altitude, satellites, hdop, freeKb, accel);
 
     HTTPClient http;
     http.setTimeout(5000);
@@ -497,6 +537,14 @@ bool Tracker::parkingIsMoving() const {
 void Tracker::parkingApply(double& lat, double& lng, float& speed) {
     bool moving = parkingIsMoving();
 
+#if ENABLE_IMU
+    if (!moving && imu.isMoving()) {
+        Serial.printf("[Parking] IMU motion override, accel=%.3f m/s²\n",
+                      imu.getAccelMag());
+        moving = true;
+    }
+#endif
+
     if (moving) {
         if (_pinned) {
             Serial.println("[Parking] pin released, device moving");
@@ -560,7 +608,6 @@ float Tracker::distanceTo(double lat1, double lng1, double lat2, double lng2) {
 void Tracker::syncTimeNTP() {
     if (WiFi.status() != WL_CONNECTED) return;
 
-    // fetch timezone offset if not yet synced
     if (!timezoneSync.isSynced()) {
         timezoneSync.fetch();
     }
@@ -615,7 +662,6 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
         Serial.println("[Tracker] GPS time untrusted (spoofing)");
     }
 
-    // use ESP32 system clock (keeps ticking after NTP sync)
     if (timeSynced) {
         struct tm timeinfo;
         if (getLocalTime(&timeinfo)) {
@@ -635,3 +681,9 @@ void Tracker::forceReleaseWifi() {
     lastConnectSuccess = false;
     Serial.println("[Tracker] WiFi force released for portal");
 }
+
+#if ENABLE_IMU
+bool Tracker::imuMoving() const {
+    return imu.isMoving();
+}
+#endif

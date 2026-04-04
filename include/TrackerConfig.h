@@ -64,3 +64,22 @@
 // before the tracker accepts "moving" state.
 #define PARKING_MOTION_MIN_MOVING     3
 #define PARKING_MAX_ACCELERATION  3.5f 
+
+// ---- IMU (BMI160) motion assist ----
+#define ENABLE_IMU                    true
+
+// I2C pins: SDA -> GPIO6, SCL -> GPIO7
+#define IMU_SDA_PIN                   6
+#define IMU_SCL_PIN                   7
+
+// Dynamic acceleration threshold (m/s²)
+// 0.20 – very sensitive (detects engine vibration at idle)
+// 0.30 – recommended default
+// 0.60 – only strong jolts / clear driving motion
+#define IMU_ACCEL_THRESHOLD           0.30f
+
+// Motion fusion strategy:
+//   FUSION_AND – moving if GPS AND IMU agree  (most reliable, default)
+//   FUSION_OR  – moving if GPS OR  IMU detect motion  (most sensitive)
+//   FUSION_IMU – IMU only, ignore GPS speed  (for testing)
+#define IMU_FUSION_STRATEGY           FUSION_AND
