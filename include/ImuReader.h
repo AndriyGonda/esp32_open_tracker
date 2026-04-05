@@ -34,6 +34,13 @@ private:
     unsigned long _lastReadMs = 0;
     static constexpr unsigned long READ_INTERVAL_MS = 100;
 
+    // Zero-read protection
+    uint8_t       _zeroCount      = 0;
+    uint8_t       _reinitCount    = 0;
+    static constexpr uint8_t MAX_ZERO_READS   = 3;
+    static constexpr uint8_t MAX_REINIT_COUNT = 5;
+
+    bool reinit();
     bool writeReg(uint8_t reg, uint8_t val);
     bool readAccel(float& ax, float& ay, float& az);
 };

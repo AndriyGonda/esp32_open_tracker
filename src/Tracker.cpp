@@ -170,11 +170,20 @@ void Tracker::update() {
 #endif
 
 #if ENABLE_IMU
-    bool _imuSays = imu.isMoving();
+    bool _imuSays  = imu.isMoving();
+    bool _imuValid = imu.getAccelMag() > 0.0f;
     bool moving;
-    if (IMU_FUSION_STRATEGY == FUSION_AND) moving = gpsMoving && _imuSays;
-    if (IMU_FUSION_STRATEGY == FUSION_OR)  moving = gpsMoving || _imuSays;
-    if (IMU_FUSION_STRATEGY == FUSION_IMU) moving = _imuSays;
+    if (!_imuValid) {
+        moving = gpsMoving;
+    } else if (IMU_FUSION_STRATEGY == FUSION_AND) {
+        moving = gpsMoving && _imuSays;
+    } else if (IMU_FUSION_STRATEGY == FUSION_OR) {
+        moving = gpsMoving || _imuSays;
+    } else if (IMU_FUSION_STRATEGY == FUSION_IMU) {
+        moving = _imuSays;
+    } else {
+        moving = gpsMoving;
+    }
 #else
     bool moving = gpsMoving;
 #endif
@@ -510,10 +519,6 @@ void Tracker::flushNextLine() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parking / stationary-point filter
-// ---------------------------------------------------------------------------
-
 void Tracker::parkingFilterUpdate(float speed) {
     unsigned long now = millis();
     _lastIntervalMs = (_lastParkingUpdateMs > 0)
@@ -564,7 +569,7 @@ void Tracker::parkingApply(double& lat, double& lng, float& speed) {
     bool moving = parkingIsMoving();
 
 #if ENABLE_IMU
-    if (!moving && imu.isMoving()) {
+    if (!moving && imu.isMoving() && imu.getAccelMag() > 0.0f) {
         Serial.printf("[Parking] IMU motion override, accel=%.3f m/s²\n",
                       imu.getAccelMag());
         moving = true;

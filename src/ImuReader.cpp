@@ -32,12 +32,59 @@ bool ImuReader::begin() {
     }
 
     writeReg(0x7E, 0xB6); // soft reset
-    delay(200);
+    delay(500);
     writeReg(0x7E, 0x11); // acc normal mode
-    delay(100);
+    delay(200);
 
     _ok = true;
     Serial.println("[IMU] BMI160 ready");
+    return true;
+}
+
+bool ImuReader::reinit() {
+    if (_reinitCount >= MAX_REINIT_COUNT) {
+        Serial.println("[IMU] max reinit attempts reached, giving up");
+        _ok = false;
+        return false;
+    }
+
+    _reinitCount++;
+    Serial.printf("[IMU] reinit attempt %d/%d\n", _reinitCount, MAX_REINIT_COUNT);
+
+    // Скидаємо стан
+    _zeroCount     = 0;
+    _baselineReady = false;
+    _baselineCount = 0;
+    _winIdx        = 0;
+    _winFull       = false;
+    _accelMag      = 0.0f;
+    _moving        = false;
+    _gx = 0; _gy = 0; _gz = 9.81f;
+
+    // Перезапускаємо акселерометр без повного Wire.begin
+    writeReg(0x7E, 0xB6); // soft reset
+    delay(500);
+
+    // Перевіряємо chip ID
+    Wire.beginTransmission(BMI160_ADDR);
+    Wire.write(0x00);
+    Wire.endTransmission(false);
+    delay(2);
+    Wire.requestFrom((uint8_t)BMI160_ADDR, (uint8_t)1);
+    if (!Wire.available()) {
+        Serial.println("[IMU] reinit: chip ID read failed");
+        return false;
+    }
+    uint8_t id = Wire.read();
+    if (id != 0xD1) {
+        Serial.printf("[IMU] reinit: unexpected chip ID 0x%02X\n", id);
+        return false;
+    }
+
+    writeReg(0x7E, 0x11); // acc normal mode
+    delay(200);
+
+    Serial.println("[IMU] reinit OK");
     return true;
 }
 
@@ -50,6 +97,22 @@ void ImuReader::update() {
 
     float ax, ay, az;
     if (!readAccel(ax, ay, az)) return;
+
+    // Захист від нульових даних
+    if (ax == 0.0f && ay == 0.0f && az == 0.0f) {
+        _zeroCount++;
+        Serial.printf("[IMU] zero read %d/%d\n", _zeroCount, MAX_ZERO_READS);
+
+        if (_zeroCount >= MAX_ZERO_READS) {
+            Serial.println("[IMU] too many zero reads, reinitializing...");
+            reinit();
+        }
+        return; // не передаємо нулі в baseline або вікно
+    }
+
+    // Нормальні дані — скидаємо лічильник нулів і reinit
+    _zeroCount   = 0;
+    _reinitCount = 0;
 
     if (!_baselineReady) {
         float alpha = 1.0f / (float)(_baselineCount + 1);
@@ -101,7 +164,6 @@ bool ImuReader::readAccel(float& ax, float& ay, float& az) {
     int16_t ry = (int16_t)(Wire.read() | (Wire.read() << 8));
     int16_t rz = (int16_t)(Wire.read() | (Wire.read() << 8));
 
-    // ACC_RANGE=0x03 → ±2g → 16384 LSB/g
     const float G = 9.80665f;
     ax = (float)rx / 16384.0f * G;
     ay = (float)ry / 16384.0f * G;
