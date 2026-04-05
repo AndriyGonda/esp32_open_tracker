@@ -6,6 +6,7 @@
 
 // Max valid hdop for tracker
 #define MAX_HDOP 2.1
+#define MIN_SATELLITES 8
 
 // Sending intervals
 #define TRACKER_INTERVAL_STATIC   120000   // 2 minutes idle
@@ -38,6 +39,8 @@
 #define BATTERY_LOW_VOLTAGE       3.5f
 #define BATTERY_CRITICAL_VOLTAGE  3.0f
 
+// Use home coordinates when battery is low and location is invalid
+#define LOW_BATT_HOME_FALLBACK true
 
 // WiFi power management
 #define WIFI_TX_POWER             52       // TX_POWER * 0.25  dBm  (formula)

@@ -126,8 +126,10 @@ void Tracker::update() {
     }
 
     if (gps.getHdop() > MAX_HDOP) {
-        Serial.print("[Tracker] poor HDOP: ");
-        Serial.println(gps.getHdop());
+        return;
+    }
+
+    if (gps.getSatellites() < MIN_SATELLITES) {
         return;
     }
 
