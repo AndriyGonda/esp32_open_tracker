@@ -6,7 +6,7 @@
 
 // Max valid hdop for tracker
 #define MAX_HDOP 2.1
-#define MIN_SATELLITES 8
+#define MIN_SATELLITES 6
 
 // Sending intervals
 #define TRACKER_INTERVAL_STATIC   120000   // 2 minutes idle
