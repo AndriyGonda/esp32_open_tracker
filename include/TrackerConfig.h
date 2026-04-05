@@ -5,7 +5,7 @@
 
 
 // Max valid hdop for tracker
-#define MAX_HDOP 3.0
+#define MAX_HDOP 2.1
 
 // Sending intervals
 #define TRACKER_INTERVAL_STATIC   120000   // 2 minutes idle

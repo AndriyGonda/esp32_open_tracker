@@ -125,6 +125,10 @@ void Tracker::update() {
         return;
     }
 
+    if (gps.getHdop() > MAX_HDOP) {
+        return;
+    }
+
     if (flushing && WiFi.status() != WL_CONNECTED) {
         flushFile.close();
         flushing = false;
