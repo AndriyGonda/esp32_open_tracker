@@ -126,6 +126,8 @@ void Tracker::update() {
     }
 
     if (gps.getHdop() > MAX_HDOP) {
+        Serial.print("[Tracker] poor HDOP: ");
+        Serial.println(gps.getHdop());
         return;
     }
 
@@ -215,18 +217,36 @@ void Tracker::update() {
                     lng = wpos.lng;
                 } else {
                     Serial.println("[Tracker] WiFi positioning failed, using fallback");
-                    lat = SENDING_LAT;
-                    lng = SENDING_LNG;
+                    if (battery.isLow()) {
+                        Serial.println("[Tracker] low battery, falling back to home coords");
+                        lat = TRACKER_HOME_LAT;
+                        lng = TRACKER_HOME_LNG;
+                    } else {
+                        lat = SENDING_LAT;
+                        lng = SENDING_LNG;
+                    }
                     isInvalidCoordinates = true;
                 }
             } else {
-                lat = SENDING_LAT;
-                lng = SENDING_LNG;
+                if (battery.isLow()) {
+                    Serial.println("[Tracker] low battery, falling back to home coords");
+                    lat = TRACKER_HOME_LAT;
+                    lng = TRACKER_HOME_LNG;
+                } else {
+                    lat = SENDING_LAT;
+                    lng = SENDING_LNG;
+                }
                 isInvalidCoordinates = true;
             }
 #else
-            lat = SENDING_LAT;
-            lng = SENDING_LNG;
+            if (battery.isLow()) {
+                Serial.println("[Tracker] low battery, falling back to home coords");
+                lat = TRACKER_HOME_LAT;
+                lng = TRACKER_HOME_LNG;
+            } else {
+                lat = SENDING_LAT;
+                lng = SENDING_LNG;
+            }
             isInvalidCoordinates = true;
 #endif
         }
