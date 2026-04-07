@@ -18,16 +18,27 @@ void Tracker::begin() {
     Serial.println(" KB");
 
 #if ENABLE_IMU
-    if (imu.begin()) {
-        imu.setThreshold(IMU_ACCEL_THRESHOLD);
-        Serial.println("[Tracker] IMU ready");
-    } else {
-        Serial.println("[Tracker] IMU init failed – continuing without IMU");
+    bool imuOk = false;
+    for (uint8_t attempt = 1; attempt <= 3; attempt++) {
+        Serial.printf("[Tracker] IMU init attempt %d/3\n", attempt);
+        if (imu.begin()) {
+            imu.setThreshold(IMU_ACCEL_THRESHOLD);
+            Serial.println("[Tracker] IMU ready");
+            imuOk = true;
+            break;
+        }
+        delay(1000);
+    }
+    if (!imuOk) {
+        Serial.println("[Tracker] IMU init failed – rebooting in 3 sec...");
+        delay(3000);
+        esp_restart();
     }
 #endif
 
     syncTimeNTP();
 }
+
 
 bool Tracker::ensureWifi() {
     if (WiFi.status() == WL_CONNECTED) {

@@ -4,6 +4,8 @@ ImuReader::ImuReader(uint8_t sdaPin, uint8_t sclPin)
     : _sdaPin(sdaPin), _sclPin(sclPin) {}
 
 bool ImuReader::begin() {
+    Wire.end();
+    delay(50);
     Wire.begin(_sdaPin, _sclPin);
     Wire.setClock(100000);
     delay(100);
@@ -51,7 +53,6 @@ bool ImuReader::reinit() {
     _reinitCount++;
     Serial.printf("[IMU] reinit attempt %d/%d\n", _reinitCount, MAX_REINIT_COUNT);
 
-    // Скидаємо стан
     _zeroCount     = 0;
     _baselineReady = false;
     _baselineCount = 0;
@@ -61,11 +62,9 @@ bool ImuReader::reinit() {
     _moving        = false;
     _gx = 0; _gy = 0; _gz = 9.81f;
 
-    // Перезапускаємо акселерометр без повного Wire.begin
     writeReg(0x7E, 0xB6); // soft reset
     delay(500);
 
-    // Перевіряємо chip ID
     Wire.beginTransmission(BMI160_ADDR);
     Wire.write(0x00);
     Wire.endTransmission(false);
@@ -98,7 +97,6 @@ void ImuReader::update() {
     float ax, ay, az;
     if (!readAccel(ax, ay, az)) return;
 
-    // Захист від нульових даних
     if (ax == 0.0f && ay == 0.0f && az == 0.0f) {
         _zeroCount++;
         Serial.printf("[IMU] zero read %d/%d\n", _zeroCount, MAX_ZERO_READS);
@@ -107,10 +105,9 @@ void ImuReader::update() {
             Serial.println("[IMU] too many zero reads, reinitializing...");
             reinit();
         }
-        return; // не передаємо нулі в baseline або вікно
+        return;
     }
 
-    // Нормальні дані — скидаємо лічильник нулів і reinit
     _zeroCount   = 0;
     _reinitCount = 0;
 
@@ -154,7 +151,7 @@ bool ImuReader::writeReg(uint8_t reg, uint8_t val) {
 
 bool ImuReader::readAccel(float& ax, float& ay, float& az) {
     Wire.beginTransmission(BMI160_ADDR);
-    Wire.write(0x12); // ACC_X_L
+    Wire.write(0x12);
     if (Wire.endTransmission(false) != 0) return false;
 
     Wire.requestFrom((uint8_t)BMI160_ADDR, (uint8_t)6);

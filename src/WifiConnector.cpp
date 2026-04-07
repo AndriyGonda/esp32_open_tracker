@@ -14,12 +14,6 @@ static const char* wifiStatusToString(wl_status_t status) {
     }
 }
 
-static void shortBeep() {
-    ledcWrite(5, 64);
-    delay(100);
-    ledcWrite(5, 0);
-}
-
 WifiConnector::WifiConnector(AppSettings& settings, LedController& led, ConfigPortal& portal)
     : settings(settings), led(led), portal(portal) {
 }
@@ -58,10 +52,8 @@ bool WifiConnector::connectToFirstAvailableSavedNetwork() {
 
     WiFi.persistent(false);
     WiFi.setSleep(false);
-
     WiFi.mode(WIFI_MODE_NULL);
     delay(300);
-
     WiFi.mode(WIFI_STA);
     delay(300);
     WiFi.disconnect(false, false);
@@ -69,28 +61,22 @@ bool WifiConnector::connectToFirstAvailableSavedNetwork() {
 
     for (uint8_t i = 0; i < count; i++) {
         auto wifi = settings.getWifi(i);
-
         String ssid = wifi.ssid;
         String password = wifi.password;
-
         ssid.trim();
 
-        if (ssid.isEmpty()) {
-            continue;
-        }
+        if (ssid.isEmpty()) continue;
 
         Serial.println();
         Serial.print("Trying WiFi #");
         Serial.print(i + 1);
         Serial.print(": ");
         Serial.println(ssid);
-
         Serial.print("Password length: ");
         Serial.println(password.length());
 
         WiFi.disconnect(false, false);
         delay(500);
-
         WiFi.begin(ssid.c_str(), password.c_str());
 
         unsigned long startedAt = millis();
@@ -114,8 +100,6 @@ bool WifiConnector::connectToFirstAvailableSavedNetwork() {
                 Serial.println("WiFi connected.");
                 Serial.print("IP: ");
                 Serial.println(WiFi.localIP());
-                led.blink(10, 100, 100);
-                shortBeep();
                 return true;
             }
 
@@ -139,14 +123,9 @@ bool WifiConnector::connectToFirstAvailableSavedNetwork() {
 }
 
 void WifiConnector::update() {
-    if (portal.isActive()) {
-        return;
-    }
+    if (portal.isActive()) return;
 
-    // do not interfere when WiFi is intentionally off (managed by Tracker)
-    if (WiFi.getMode() == WIFI_OFF) {
-        return;
-    }
+    if (WiFi.getMode() == WIFI_OFF) return;
 
     if (WiFi.status() == WL_CONNECTED) {
         reconnecting = false;
@@ -156,9 +135,7 @@ void WifiConnector::update() {
     unsigned long now = millis();
 
     if (!reconnecting) {
-        if (now - lastReconnectAt < RECONNECT_INTERVAL_MS) {
-            return;
-        }
+        if (now - lastReconnectAt < RECONNECT_INTERVAL_MS) return;
         startReconnect();
         return;
     }
@@ -194,8 +171,6 @@ void WifiConnector::checkReconnect() {
         Serial.println("[WifiConnector] reconnected!");
         Serial.print("IP: ");
         Serial.println(WiFi.localIP());
-        led.blink(10, 100, 100);
-        shortBeep();
         reconnecting = false;
         return;
     }
@@ -205,9 +180,7 @@ void WifiConnector::checkReconnect() {
                     status == WL_NO_SSID_AVAIL    ||
                     status == WL_CONNECTION_LOST;
 
-    if (!timedOut && !failed) {
-        return;
-    }
+    if (!timedOut && !failed) return;
 
     reconnectIndex++;
     uint8_t count = settings.getWifiCount();

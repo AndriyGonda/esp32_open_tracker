@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <esp_task_wdt.h>
 #include "AppSettings.h"
 #include "LedController.h"
 #include "WifiConnector.h"
@@ -52,6 +53,16 @@ static void printLoadedSettings() {
     Serial.println();
 }
 
+static void init_watchdog() {
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = 30000,
+        .idle_core_mask = 0,
+        .trigger_panic = true
+    };
+    esp_task_wdt_reconfigure(&wdt_config);
+    esp_task_wdt_add(NULL);
+}
+
 void setup() {
     delay(300);
     Serial.begin(115200);
@@ -74,9 +85,11 @@ void setup() {
     Serial.println("WiFi off at startup, Tracker will connect when needed");
 
     tracker.begin();
+    init_watchdog();
 }
 
 void loop() {
+    esp_task_wdt_reset();
     powerManager.update();
 
     if (!powerManager.isOperational()) {
@@ -87,7 +100,7 @@ void loop() {
     if (buttonHandler.isLongPressTriggered()) {
         if (!configPortal.isActive()) {
             Serial.println("Long press detected. Opening config portal...");
-            tracker.forceReleaseWifi(); 
+            tracker.forceReleaseWifi();
             configPortal.start();
         }
     }
