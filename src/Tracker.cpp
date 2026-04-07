@@ -30,9 +30,7 @@ void Tracker::begin() {
         delay(1000);
     }
     if (!imuOk) {
-        Serial.println("[Tracker] IMU init failed – rebooting in 3 sec...");
-        delay(3000);
-        esp_restart();
+        Serial.println("[Tracker] IMU init failed, working without IMU");
     }
 #endif
 
