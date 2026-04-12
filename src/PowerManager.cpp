@@ -67,10 +67,10 @@ void PowerManager::goToDeepSleep() {
     WiFi.mode(WIFI_OFF);
 
     ledcWrite(POWER_BUZZER_PIN, 0);
-
     delay(100);
 
-    Serial.println("[PowerManager] going to deep sleep for 1 minute");
     esp_sleep_enable_timer_wakeup(60ULL * 1000000ULL);
+
+    Serial.println("[PowerManager] going to deep sleep, wakeup on motion or timer");
     esp_deep_sleep_start();
 }

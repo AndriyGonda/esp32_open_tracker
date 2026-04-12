@@ -1,6 +1,7 @@
 #include <time.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
+#include <esp_sleep.h>
 #include "Tracker.h"
 
 Tracker::Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led)
@@ -23,6 +24,9 @@ void Tracker::begin() {
         Serial.printf("[Tracker] IMU init attempt %d/3\n", attempt);
         if (imu.begin()) {
             imu.setThreshold(IMU_ACCEL_THRESHOLD);
+#ifdef IMU_INT_PIN
+            imu.enableMotionInterrupt(IMU_INT_PIN);
+#endif
             Serial.println("[Tracker] IMU ready");
             imuOk = true;
             break;
@@ -36,7 +40,6 @@ void Tracker::begin() {
 
     syncTimeNTP();
 }
-
 
 bool Tracker::ensureWifi() {
     if (WiFi.status() == WL_CONNECTED) {
@@ -52,6 +55,9 @@ bool Tracker::ensureWifi() {
         return false;
     }
 
+    static constexpr unsigned long WIFI_TOTAL_TIMEOUT_MS = 15000;
+    unsigned long wifiStart = millis();
+
     Serial.println("[Tracker] WiFi on...");
     WiFi.mode(WIFI_STA);
     esp_wifi_set_max_tx_power(WIFI_TX_POWER);
@@ -60,6 +66,11 @@ bool Tracker::ensureWifi() {
     bool connected = false;
 
     for (uint8_t i = 0; i < count && !connected; i++) {
+        if (millis() - wifiStart >= WIFI_TOTAL_TIMEOUT_MS) {
+            Serial.println("[Tracker] WiFi total timeout");
+            break;
+        }
+
         auto wifi = settings.getWifi(i);
         String ssid = wifi.ssid;
         ssid.trim();
@@ -71,7 +82,8 @@ bool Tracker::ensureWifi() {
         WiFi.begin(ssid.c_str(), wifi.password.c_str());
 
         unsigned long startedAt = millis();
-        while (millis() - startedAt < 10000) {
+        while (millis() - startedAt < 10000 &&
+               millis() - wifiStart < WIFI_TOTAL_TIMEOUT_MS) {
             if (WiFi.status() == WL_CONNECTED) {
                 connected = true;
                 break;
@@ -209,6 +221,48 @@ void Tracker::update() {
         lastMoving = moving;
     }
 
+    // Deep sleep after long stationary period
+    if (!moving && _stationarySince > 0) {
+        unsigned long stationaryMs = millis() - _stationarySince;
+        if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
+            Serial.printf("[Tracker] stationary for %lu min, going to deep sleep\n",
+                          stationaryMs / 60000);
+
+            if (flushing) {
+                flushFile.close();
+                flushing = false;
+            }
+
+            double lat = gps.getLatitude();
+            double lng = gps.getLongitude();
+            float spd  = 0.0f;
+            float bear = gps.getBearing();
+#if ENABLE_IMU
+            float accel = imu.getAccelMag();
+#else
+            float accel = 0.0f;
+#endif
+
+#if ENABLE_PARKING_FILTER
+            parkingApply(lat, lng, spd);
+#endif
+
+            Serial.println("[Tracker] sending last position before sleep...");
+            if (ensureWifi()) {
+                sendToServer(lat, lng, spd, bear, accel, false);
+                delay(500);
+                releaseWifi();
+            } else {
+                saveToBlackbox(lat, lng, spd, bear, accel, false);
+            }
+
+            esp_sleep_enable_timer_wakeup(60ULL * 1000000ULL);
+            Serial.println("[Tracker] deep sleep, wakeup on motion or 60s timer");
+            delay(100);
+            esp_deep_sleep_start();
+        }
+    }
+
     if (!shouldSend()) {
         return;
     }
@@ -274,6 +328,10 @@ void Tracker::update() {
 
     if (isInvalidCoordinates) {
         speed = 0.0f;
+        if (!wifiManagedByUs) {
+            saveToBlackbox(lat, lng, speed, gps.getBearing(), 0.0f, true);
+            return;
+        }
     }
 
     float bearing = gps.getBearing();
@@ -352,7 +410,7 @@ bool Tracker::shouldSend() {
 String Tracker::buildUrl(double lat, double lng, float speed, float bearing,
                          unsigned long timestamp, float voltage,
                          float altitude, uint32_t satellites,
-                         float hdop, uint32_t freeKb, float accel) {
+                         float hdop, uint32_t freeKb, float accel, bool invalid) {
     String url = "http://";
     url += settings.getServerHost();
     url += ":";
@@ -383,6 +441,8 @@ String Tracker::buildUrl(double lat, double lng, float speed, float bearing,
     url += String(freeKb);
     url += "&accel=";
     url += String(accel, 3);
+    url += "&invalid=";
+    url += invalid ? "1" : "0";
     return url;
 }
 
@@ -396,7 +456,13 @@ void Tracker::sendToServer(double lat, double lng, float speed, float bearing,
                           gps.getSatellites(),
                           (float)gps.getHdop(),
                           (LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024,
-                          accel);
+                          accel, invalid);
+
+    if (url.length() > 512) {
+        Serial.println("[Tracker] URL too long, saving to blackbox");
+        saveToBlackbox(lat, lng, speed, bearing, accel, invalid);
+        return;
+    }
 
     Serial.print("[Tracker] sending: ");
     Serial.println(url);
@@ -442,17 +508,18 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
         return;
     }
 
-    f.print(timestamp);           f.print(",");
-    f.print(String(lat, 6));      f.print(",");
-    f.print(String(lng, 6));      f.print(",");
-    f.print(String(speed, 1));    f.print(",");
-    f.print(String(bearing, 1));  f.print(",");
-    f.print(String(voltage, 2));  f.print(",");
-    f.print(String(altitude, 0)); f.print(",");
-    f.print(String(sats));        f.print(",");
-    f.print(String(hdop, 1));     f.print(",");
-    f.print(String(freeKb));      f.print(",");
-    f.println(String(accel, 3));
+    f.print(timestamp);              f.print(",");
+    f.print(String(lat, 6));         f.print(",");
+    f.print(String(lng, 6));         f.print(",");
+    f.print(String(speed, 1));       f.print(",");
+    f.print(String(bearing, 1));     f.print(",");
+    f.print(String(voltage, 2));     f.print(",");
+    f.print(String(altitude, 0));    f.print(",");
+    f.print(String(sats));           f.print(",");
+    f.print(String(hdop, 1));        f.print(",");
+    f.print(String(freeKb));         f.print(",");
+    f.print(String(accel, 3));       f.print(",");
+    f.println(invalid ? "1" : "0");
     f.close();
 
     Serial.println("[Tracker] blackbox: saved");
@@ -482,19 +549,20 @@ void Tracker::flushNextLine() {
     line.trim();
     if (line.isEmpty()) return;
 
-    int i0 = line.indexOf(',');
-    int i1 = line.indexOf(',', i0 + 1);
-    int i2 = line.indexOf(',', i1 + 1);
-    int i3 = line.indexOf(',', i2 + 1);
-    int i4 = line.indexOf(',', i3 + 1);
-    int i5 = line.indexOf(',', i4 + 1);
-    int i6 = line.indexOf(',', i5 + 1);
-    int i7 = line.indexOf(',', i6 + 1);
-    int i8 = line.indexOf(',', i7 + 1);
-    int i9 = line.indexOf(',', i8 + 1);
+    int i0  = line.indexOf(',');
+    int i1  = line.indexOf(',', i0 + 1);
+    int i2  = line.indexOf(',', i1 + 1);
+    int i3  = line.indexOf(',', i2 + 1);
+    int i4  = line.indexOf(',', i3 + 1);
+    int i5  = line.indexOf(',', i4 + 1);
+    int i6  = line.indexOf(',', i5 + 1);
+    int i7  = line.indexOf(',', i6 + 1);
+    int i8  = line.indexOf(',', i7 + 1);
+    int i9  = line.indexOf(',', i8 + 1);
+    int i10 = line.indexOf(',', i9 + 1);
 
     if (i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0 || i4 < 0 ||
-        i5 < 0 || i6 < 0 || i7 < 0 || i8 < 0 || i9 < 0) return;
+        i5 < 0 || i6 < 0 || i7 < 0 || i8 < 0 || i9 < 0 || i10 < 0) return;
 
     unsigned long timestamp = line.substring(0, i0).toInt();
     double lat          = line.substring(i0 + 1, i1).toDouble();
@@ -506,10 +574,11 @@ void Tracker::flushNextLine() {
     uint32_t satellites = line.substring(i6 + 1, i7).toInt();
     float hdop          = line.substring(i7 + 1, i8).toFloat();
     uint32_t freeKb     = line.substring(i8 + 1, i9).toInt();
-    float accel         = line.substring(i9 + 1).toFloat();
+    float accel         = line.substring(i9 + 1, i10).toFloat();
+    bool invalid        = line.substring(i10 + 1).toInt() == 1;
 
     String url = buildUrl(lat, lng, speed, bearing, timestamp,
-                          voltage, altitude, satellites, hdop, freeKb, accel);
+                          voltage, altitude, satellites, hdop, freeKb, accel, invalid);
 
     HTTPClient http;
     http.setTimeout(5000);
@@ -681,32 +750,47 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
     }
 
     static constexpr unsigned long MIN_VALID_TIME = 1704067200UL;
+    static constexpr unsigned long MAX_VALID_TIME = 1893456000UL;
 
     if (!invalid) {
         unsigned long gpsTime = gps.hasTime() ? gps.getUnixTime() : 0;
 
         if (gpsTime > 0) {
-            bool tooOld = gpsTime < MIN_VALID_TIME;
-            bool tooFarInFuture = lastValidUnixTime > 0 &&
+            bool tooOld         = gpsTime < MIN_VALID_TIME;
+            bool tooFarInFuture = gpsTime > MAX_VALID_TIME;
+            bool inconsistent   = lastValidUnixTime > 0 &&
                                   gpsTime > lastValidUnixTime + ONE_YEAR_SECONDS;
 
-            if (!tooOld && !tooFarInFuture) {
+            if (!tooOld && !tooFarInFuture && !inconsistent) {
                 lastValidUnixTime = gpsTime;
                 return gpsTime;
             }
 
-            Serial.print("[Tracker] suspicious GPS time: ");
+            Serial.print("[Tracker] suspicious GPS time rejected: ");
             Serial.println(gpsTime);
         }
     } else {
-        Serial.println("[Tracker] GPS time untrusted (spoofing)");
+        Serial.println("[Tracker] invalid coords, using last valid timestamp");
     }
 
     if (timeSynced) {
         struct tm timeinfo;
         if (getLocalTime(&timeinfo)) {
-            return (unsigned long)mktime(&timeinfo) + timezoneSync.getOffsetSec();
+            unsigned long ntpTime = (unsigned long)mktime(&timeinfo)
+                                    + timezoneSync.getOffsetSec();
+            if (ntpTime >= MIN_VALID_TIME && ntpTime <= MAX_VALID_TIME) {
+                if (!invalid) lastValidUnixTime = ntpTime;
+                return ntpTime;
+            }
+            Serial.print("[Tracker] suspicious NTP time rejected: ");
+            Serial.println(ntpTime);
+            timeSynced = false;
         }
+    }
+
+    if (lastValidUnixTime >= MIN_VALID_TIME && lastValidUnixTime <= MAX_VALID_TIME) {
+        Serial.println("[Tracker] using last known valid time");
+        return lastValidUnixTime;
     }
 
     return millis() / 1000;

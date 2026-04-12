@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <esp_task_wdt.h>
+#include <esp_sleep.h>
 #include "AppSettings.h"
 #include "LedController.h"
 #include "WifiConnector.h"
@@ -67,6 +68,16 @@ void setup() {
     delay(300);
     Serial.begin(115200);
     delay(300);
+
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause == ESP_SLEEP_WAKEUP_GPIO) {
+        Serial.println("[Boot] wakeup by IMU motion interrupt");
+    } else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
+        Serial.println("[Boot] wakeup by timer");
+    } else {
+        Serial.println("[Boot] normal boot");
+    }
+
     btStop();
     setCpuFrequencyMhz(80);
 

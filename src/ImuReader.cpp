@@ -1,14 +1,16 @@
 #include "ImuReader.h"
+#include <esp_sleep.h>
+#include <driver/gpio.h>
 
 ImuReader::ImuReader(uint8_t sdaPin, uint8_t sclPin)
     : _sdaPin(sdaPin), _sclPin(sclPin) {}
 
 bool ImuReader::begin() {
     Wire.end();
-    delay(50);
+    delay(100);
     Wire.begin(_sdaPin, _sclPin);
     Wire.setClock(100000);
-    delay(100);
+    delay(200);
     Serial.println("[IMU] Wire started");
 
     Wire.beginTransmission(BMI160_ADDR);
@@ -33,14 +35,31 @@ bool ImuReader::begin() {
         return false;
     }
 
-    writeReg(0x7E, 0xB6); // soft reset
+    writeReg(0x7E, 0xB6);
     delay(500);
-    writeReg(0x7E, 0x11); // acc normal mode
+    writeReg(0x7E, 0x11);
     delay(200);
 
     _ok = true;
     Serial.println("[IMU] BMI160 ready");
     return true;
+}
+
+void ImuReader::enableMotionInterrupt(uint8_t intPin) {
+    if (!_ok) return;
+
+    writeReg(0x53, 0x08); // INT_OUT_CTRL: INT1 active high, push-pull
+    writeReg(0x54, 0x00); // INT_LATCH: non-latched
+    writeReg(0x55, 0x04); // INT_MAP_0: any-motion to INT1
+    writeReg(0x5F, 0x00); // INT_MOTION_0: duration = 1 sample
+    writeReg(0x60, 0x14); // INT_MOTION_1: threshold ~100mg
+    writeReg(0x50, 0x07); // INT_EN_0: enable any-motion X, Y, Z
+
+    Serial.println("[IMU] motion interrupt enabled on INT1");
+
+    gpio_wakeup_enable((gpio_num_t)intPin, GPIO_INTR_HIGH_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+    Serial.printf("[IMU] gpio wakeup configured on GPIO%d\n", intPin);
 }
 
 bool ImuReader::reinit() {
@@ -62,7 +81,7 @@ bool ImuReader::reinit() {
     _moving        = false;
     _gx = 0; _gy = 0; _gz = 9.81f;
 
-    writeReg(0x7E, 0xB6); // soft reset
+    writeReg(0x7E, 0xB6);
     delay(500);
 
     Wire.beginTransmission(BMI160_ADDR);
@@ -80,7 +99,7 @@ bool ImuReader::reinit() {
         return false;
     }
 
-    writeReg(0x7E, 0x11); // acc normal mode
+    writeReg(0x7E, 0x11);
     delay(200);
 
     Serial.println("[IMU] reinit OK");
