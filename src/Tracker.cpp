@@ -177,9 +177,15 @@ void Tracker::update() {
     static unsigned long lastImuPrint = 0;
     if (millis() - lastImuPrint >= 2000) {
         lastImuPrint = millis();
-        Serial.printf("[IMU] accel=%.3f m/s²  motion=%s\n",
+        Serial.printf("[IMU] accel=%.3f m/s²  motion=%s  ready=%s\n",
             imu.getAccelMag(),
-            imu.isMoving() ? "YES" : "NO");
+            imu.isMoving() ? "YES" : "NO",
+            imu.isReady() ? "YES" : "NO");
+    }
+
+    // Якщо IMU готовий і каже стоянка — обнуляємо швидкість
+    if (imu.isReady() && !imu.isMoving()) {
+        speed = 0.0f;
     }
 #endif
 
@@ -192,9 +198,9 @@ void Tracker::update() {
 
 #if ENABLE_IMU
     bool _imuSays  = imu.isMoving();
-    bool _imuValid = imu.getAccelMag() > 0.0f;
+    bool _imuReady = imu.isReady();
     bool moving;
-    if (!_imuValid) {
+    if (!_imuReady) {
         moving = gpsMoving;
     } else if (IMU_FUSION_STRATEGY == FUSION_AND) {
         moving = gpsMoving && _imuSays;
@@ -647,7 +653,7 @@ void Tracker::parkingApply(double& lat, double& lng, float& speed) {
     bool moving = parkingIsMoving();
 
 #if ENABLE_IMU
-    if (!moving && imu.isMoving() && imu.getAccelMag() > 0.0f) {
+    if (!moving && imu.isMoving() && imu.isReady()) {
         Serial.printf("[Parking] IMU motion override, accel=%.3f m/s²\n",
                       imu.getAccelMag());
         moving = true;

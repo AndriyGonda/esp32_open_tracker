@@ -11,6 +11,7 @@ public:
     void update();
     void enableMotionInterrupt(uint8_t intPin);
     bool isMoving() const { return _moving; }
+    bool isReady() const { return _ok && _baselineReady; }
     float getAccelMag() const { return _accelMag; }
     void setThreshold(float t) { _threshold = t; }
 
