@@ -183,7 +183,6 @@ void Tracker::update() {
             imu.isReady() ? "YES" : "NO");
     }
 
-    // Якщо IMU готовий і каже стоянка — обнуляємо швидкість
     if (imu.isReady() && !imu.isMoving()) {
         speed = 0.0f;
     }
@@ -227,12 +226,17 @@ void Tracker::update() {
         lastMoving = moving;
     }
 
-    // Deep sleep after long stationary period
     if (!moving && _stationarySince > 0) {
         unsigned long stationaryMs = millis() - _stationarySince;
-        if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
-            Serial.printf("[Tracker] stationary for %lu min, going to deep sleep\n",
-                          stationaryMs / 60000);
+
+        if (stationaryMs >= PARKING_SLEEP_DELAY_MS &&
+            stationaryMs >= PARKING_SLEEP_MIN_MS) {
+
+            uint64_t sleepUs = (uint64_t)PARKING_SLEEP_DURATION_MS * 1000ULL;
+
+            Serial.printf("[Tracker] stationary for %lu min, sleeping for %llu min\n",
+                          stationaryMs / 60000,
+                          sleepUs / 60000000ULL);
 
             if (flushing) {
                 flushFile.close();
@@ -250,7 +254,7 @@ void Tracker::update() {
 #endif
 
 #if ENABLE_PARKING_FILTER
-            parkingApply(lat, lng, spd);
+            parkingApply(lat, lng, spd, false);
 #endif
 
             Serial.println("[Tracker] sending last position before sleep...");
@@ -262,8 +266,9 @@ void Tracker::update() {
                 saveToBlackbox(lat, lng, spd, bear, accel, false);
             }
 
-            esp_sleep_enable_timer_wakeup(60ULL * 1000000ULL);
-            Serial.println("[Tracker] deep sleep, wakeup on motion or 60s timer");
+            esp_sleep_enable_timer_wakeup(sleepUs);
+            Serial.printf("[Tracker] deep sleep for %llu min, wakeup on motion or timer\n",
+                          sleepUs / 60000000ULL);
             delay(100);
             esp_deep_sleep_start();
         }
@@ -280,11 +285,13 @@ void Tracker::update() {
     bool isInvalidCoordinates = false;
 
 #if ENABLE_PARKING_FILTER
-    parkingApply(lat, lng, speed);
+    parkingApply(lat, lng, speed, moving);
 #endif
 
     if (ENABLE_HOME_POINT_FILTERING) {
         float dist = distanceTo(lat, lng, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
+        Serial.printf("[Tracker] dist to home: %.1f km, limit: %.1f km\n",
+                      dist / 1000.0f, (float)TRACKER_HOME_RADIUS_KM);
         if (dist / 1000.0f > TRACKER_HOME_RADIUS_KM) {
 #if ENABLE_WIFI_POSITIONING
             Serial.println("[Tracker] coordinates outside home zone, trying WiFi positioning...");
@@ -334,10 +341,13 @@ void Tracker::update() {
 
     if (isInvalidCoordinates) {
         speed = 0.0f;
-        if (!wifiManagedByUs) {
+        if (WiFi.status() == WL_CONNECTED) {
+            sendToServer(lat, lng, speed, gps.getBearing(), 0.0f, true);
+        } else {
             saveToBlackbox(lat, lng, speed, gps.getBearing(), 0.0f, true);
-            return;
         }
+        releaseWifi();
+        return;
     }
 
     float bearing = gps.getBearing();
@@ -649,9 +659,7 @@ bool Tracker::parkingIsMoving() const {
     return true;
 }
 
-void Tracker::parkingApply(double& lat, double& lng, float& speed) {
-    bool moving = parkingIsMoving();
-
+void Tracker::parkingApply(double& lat, double& lng, float& speed, bool moving) {
 #if ENABLE_IMU
     if (!moving && imu.isMoving() && imu.isReady()) {
         Serial.printf("[Parking] IMU motion override, accel=%.3f m/s²\n",

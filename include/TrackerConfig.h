@@ -89,6 +89,11 @@
 
 #define IMU_INT_PIN  2
 
-// Deep sleep after being stationary for this long
-// 10 minutes = 600000 ms
-#define PARKING_SLEEP_DELAY_MS  600000UL
+// How long the device must be stationary before sleep is considered (ms)
+// 10 minutes = 600000
+#define PARKING_SLEEP_DELAY_MS      600000UL
+
+
+// How long to sleep when stationary (ms)
+// 10 minutes = 600000
+#define PARKING_SLEEP_DURATION_MS   600000UL

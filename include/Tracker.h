@@ -86,7 +86,7 @@ private:
 
     void parkingFilterUpdate(float speed);
     bool parkingIsMoving() const;
-    void parkingApply(double& lat, double& lng, float& speed);
+    void parkingApply(double& lat, double& lng, float& speed, bool moving);
 
     unsigned long currentInterval();
     bool shouldSend();
