@@ -132,7 +132,6 @@ void Tracker::releaseWifi() {
     wifiManagedByUs = false;
 }
 
-
 void Tracker::update() {
     if (portal.isActive()) {
         if (flushing) {
@@ -140,18 +139,6 @@ void Tracker::update() {
             flushing = false;
         }
         wifiManagedByUs = false;
-        return;
-    }
-
-    if (!gps.hasLocation()) {
-        return;
-    }
-
-    if (gps.getHdop() > MAX_HDOP) {
-        return;
-    }
-
-    if (gps.getSatellites() < MIN_SATELLITES) {
         return;
     }
 
@@ -167,7 +154,12 @@ void Tracker::update() {
         return;
     }
 
-    float speed = gps.getSpeed();
+    const bool gpsValid =
+            gps.hasLocation() &&
+            gps.getHdop() <= MAX_HDOP &&
+            gps.getSatellites() >= MIN_SATELLITES;
+
+    float speed = gpsValid ? gps.getSpeed() : 0.0f;
     if (speed > TRACKER_MAX_VALID_SPEED) {
         speed = 0.0f;
     }
@@ -191,32 +183,54 @@ void Tracker::update() {
 
 #if ENABLE_PARKING_FILTER
     parkingFilterUpdate(speed);
-    bool gpsMoving = parkingIsMoving();
+    bool gpsMoving = gpsValid ? parkingIsMoving() : false;
 #else
-    bool gpsMoving = speed >= TRACKER_SPEED_THRESHOLD;
+    bool gpsMoving = gpsValid && (speed >= TRACKER_SPEED_THRESHOLD);
 #endif
 
 #if ENABLE_IMU
-    bool _imuSays  = imu.isMoving();
-    bool _imuReady = imu.isReady();
-    bool moving;
-    if (!_imuReady) {
-        moving = gpsMoving;
+    bool imuSays  = imu.isMoving();
+    bool imuReady = imu.isReady();
+    bool rawMoving;
+    if (!imuReady) {
+        rawMoving = gpsMoving;
     } else if (IMU_FUSION_STRATEGY == FUSION_AND) {
-        moving = gpsMoving && _imuSays;
+        rawMoving = gpsMoving && imuSays;
     } else if (IMU_FUSION_STRATEGY == FUSION_OR) {
-        moving = gpsMoving || _imuSays;
+        rawMoving = gpsMoving || imuSays;
     } else if (IMU_FUSION_STRATEGY == FUSION_IMU) {
-        moving = _imuSays;
+        rawMoving = imuSays;
     } else {
-        moving = gpsMoving;
+        rawMoving = gpsMoving;
     }
 #else
-    bool moving = gpsMoving;
+    bool rawMoving = gpsMoving;
 #endif
 
-    static bool lastMoving = false;
-    if (moving != lastMoving) {
+    // Антидребезг руху: короткі спайки не скидають stationary timer
+    static unsigned long movingCandidateSince = 0;
+    static bool moving = false;
+    static constexpr unsigned long MOVING_CONFIRM_MS = 5000;
+
+    if (rawMoving) {
+        if (movingCandidateSince == 0) {
+            movingCandidateSince = millis();
+            Serial.println("[Tracker] movement candidate started");
+        }
+        if (!moving && millis() - movingCandidateSince >= MOVING_CONFIRM_MS) {
+            moving = true;
+            Serial.println("[Tracker] movement confirmed");
+        }
+    } else {
+        if (moving) {
+            Serial.println("[Tracker] movement cleared");
+        }
+        movingCandidateSince = 0;
+        moving = false;
+    }
+
+    static bool lastMovingPrinted = false;
+    if (moving != lastMovingPrinted) {
         Serial.print("[Tracker] mode: ");
         Serial.println(moving ? "MOVING" : "STATIONARY");
 
@@ -224,32 +238,44 @@ void Tracker::update() {
             releaseWifi();
         }
 
-        lastMoving = moving;
+        lastMovingPrinted = moving;
         lastSentAt = millis();
     }
 
-    if (!shouldSend()) {
-        return;
+    double lat = 0.0;
+    double lng = 0.0;
+
+    if (gpsValid) {
+        lat = gps.getLatitude();
+        lng = gps.getLongitude();
+    } else if (_pinned) {
+        lat = _pinLat;
+        lng = _pinLng;
     }
 
-    lastSentAt = millis();
-
-    double lat = gps.getLatitude();
-    double lng = gps.getLongitude();
     bool isInvalidCoordinates = false;
 
 #if ENABLE_PARKING_FILTER
     parkingApply(lat, lng, speed, moving);
 #endif
 
-    // Deep sleep перевірка після parkingApply — _stationarySince вже оновлений
+    if (_stationarySince > 0) {
+        static unsigned long lastStationaryPrint = 0;
+        if (millis() - lastStationaryPrint >= 5000) {
+            lastStationaryPrint = millis();
+            Serial.printf("[Tracker] stationary for %lu sec\n",
+                          (millis() - _stationarySince) / 1000UL);
+        }
+    }
+
+    // Deep sleep перевіряємо ДО shouldSend(), інакше sleep може не настати вчасно
     if (!moving && _stationarySince > 0) {
         unsigned long stationaryMs = millis() - _stationarySince;
         if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
             uint64_t sleepUs = (uint64_t)PARKING_SLEEP_DURATION_MS * 1000ULL;
 
             Serial.printf("[Tracker] stationary for %lu min, sleeping for %llu min\n",
-                          stationaryMs / 60000,
+                          stationaryMs / 60000UL,
                           sleepUs / 60000000ULL);
 
             if (flushing) {
@@ -265,13 +291,17 @@ void Tracker::update() {
             float accel = 0.0f;
 #endif
 
-            Serial.println("[Tracker] sending last position before sleep...");
-            if (ensureWifi()) {
-                sendToServer(lat, lng, spd, bear, accel, false);
-                delay(500);
-                releaseWifi();
+            if (lat != 0.0 || lng != 0.0) {
+                Serial.println("[Tracker] sending last position before sleep...");
+                if (ensureWifi()) {
+                    sendToServer(lat, lng, spd, bear, accel, false);
+                    delay(500);
+                    releaseWifi();
+                } else {
+                    saveToBlackbox(lat, lng, spd, bear, accel, false);
+                }
             } else {
-                saveToBlackbox(lat, lng, spd, bear, accel, false);
+                Serial.println("[Tracker] no valid coords for final send before sleep");
             }
 
             esp_sleep_enable_timer_wakeup(sleepUs);
@@ -280,6 +310,17 @@ void Tracker::update() {
             delay(100);
             esp_deep_sleep_start();
         }
+    }
+
+    if (!shouldSend()) {
+        return;
+    }
+
+    lastSentAt = millis();
+
+    if (!gpsValid && !_pinned) {
+        Serial.println("[Tracker] GPS invalid and no pin yet, skip send");
+        return;
     }
 
     if (ENABLE_HOME_POINT_FILTERING) {
@@ -660,14 +701,6 @@ bool Tracker::parkingIsMoving() const {
 }
 
 void Tracker::parkingApply(double& lat, double& lng, float& speed, bool moving) {
-#if ENABLE_IMU
-    if (!moving && imu.isMoving() && imu.isReady()) {
-        Serial.printf("[Parking] IMU motion override, accel=%.3f m/s²\n",
-                      imu.getAccelMag());
-        moving = true;
-    }
-#endif
-
     if (moving) {
         if (_pinned) {
             Serial.println("[Parking] pin released, device moving");
