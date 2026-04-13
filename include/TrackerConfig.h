@@ -53,7 +53,7 @@
 
 // --- Position pinning ---
 // Seconds the device must remain stationary before the anchor is set.
-#define PARKING_PIN_DELAY_SEC         120
+#define PARKING_PIN_DELAY_SEC         30
 
 // Maximum drift (meters) allowed while pinned.
 #define PARKING_PIN_RADIUS_M          5.0f
