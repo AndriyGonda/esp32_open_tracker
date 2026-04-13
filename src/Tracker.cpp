@@ -132,6 +132,7 @@ void Tracker::releaseWifi() {
     wifiManagedByUs = false;
 }
 
+
 void Tracker::update() {
     if (portal.isActive()) {
         if (flushing) {
@@ -227,9 +228,23 @@ void Tracker::update() {
         lastSentAt = millis();
     }
 
+    if (!shouldSend()) {
+        return;
+    }
+
+    lastSentAt = millis();
+
+    double lat = gps.getLatitude();
+    double lng = gps.getLongitude();
+    bool isInvalidCoordinates = false;
+
+#if ENABLE_PARKING_FILTER
+    parkingApply(lat, lng, speed, moving);
+#endif
+
+    // Deep sleep перевірка після parkingApply — _stationarySince вже оновлений
     if (!moving && _stationarySince > 0) {
         unsigned long stationaryMs = millis() - _stationarySince;
-
         if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
             uint64_t sleepUs = (uint64_t)PARKING_SLEEP_DURATION_MS * 1000ULL;
 
@@ -242,18 +257,12 @@ void Tracker::update() {
                 flushing = false;
             }
 
-            double lat = gps.getLatitude();
-            double lng = gps.getLongitude();
             float spd  = 0.0f;
             float bear = gps.getBearing();
 #if ENABLE_IMU
             float accel = imu.getAccelMag();
 #else
             float accel = 0.0f;
-#endif
-
-#if ENABLE_PARKING_FILTER
-            parkingApply(lat, lng, spd, false);
 #endif
 
             Serial.println("[Tracker] sending last position before sleep...");
@@ -272,20 +281,6 @@ void Tracker::update() {
             esp_deep_sleep_start();
         }
     }
-
-    if (!shouldSend()) {
-        return;
-    }
-
-    lastSentAt = millis();
-
-    double lat = gps.getLatitude();
-    double lng = gps.getLongitude();
-    bool isInvalidCoordinates = false;
-
-#if ENABLE_PARKING_FILTER
-    parkingApply(lat, lng, speed, moving);
-#endif
 
     if (ENABLE_HOME_POINT_FILTERING) {
         float dist = distanceTo(lat, lng, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
