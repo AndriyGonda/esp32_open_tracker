@@ -224,13 +224,13 @@ void Tracker::update() {
         }
 
         lastMoving = moving;
+        lastSentAt = millis();
     }
 
     if (!moving && _stationarySince > 0) {
         unsigned long stationaryMs = millis() - _stationarySince;
 
         if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
-
             uint64_t sleepUs = (uint64_t)PARKING_SLEEP_DURATION_MS * 1000ULL;
 
             Serial.printf("[Tracker] stationary for %lu min, sleeping for %llu min\n",
@@ -399,6 +399,12 @@ unsigned long Tracker::currentInterval() {
     if (!gps.hasLocation()) {
         return TRACKER_INTERVAL_STATIC;
     }
+
+#if ENABLE_IMU
+    if (imu.isReady() && !imu.isMoving()) {
+        return TRACKER_INTERVAL_STATIC;
+    }
+#endif
 
     float speed   = gps.getSpeed();
     float bearing = gps.getBearing();

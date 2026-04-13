@@ -75,11 +75,8 @@
 #define IMU_SDA_PIN                   6
 #define IMU_SCL_PIN                   7
 
-// Dynamic acceleration threshold (m/s²)
-// 0.20 – very sensitive (detects engine vibration at idle)
-// 0.30 – recommended default
-// 0.60 – only strong jolts / clear driving motion
-#define IMU_ACCEL_THRESHOLD           0.30f
+
+#define IMU_ACCEL_THRESHOLD           1.3f
 
 // Motion fusion strategy:
 //   FUSION_AND – moving if GPS AND IMU agree  (most reliable, default)
