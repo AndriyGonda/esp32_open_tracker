@@ -229,8 +229,7 @@ void Tracker::update() {
     if (!moving && _stationarySince > 0) {
         unsigned long stationaryMs = millis() - _stationarySince;
 
-        if (stationaryMs >= PARKING_SLEEP_DELAY_MS &&
-            stationaryMs >= PARKING_SLEEP_MIN_MS) {
+        if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
 
             uint64_t sleepUs = (uint64_t)PARKING_SLEEP_DURATION_MS * 1000ULL;
 
