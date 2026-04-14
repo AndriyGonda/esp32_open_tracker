@@ -1,4 +1,5 @@
 #include <time.h>
+#include <math.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include <esp_sleep.h>
@@ -6,6 +7,39 @@
 
 Tracker::Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led)
     : gps(gps), settings(settings), battery(battery), portal(portal), led(led) {
+}
+
+bool Tracker::isZeroCoordinate(double lat, double lng) const {
+    return fabs(lat) < COORD_EPS && fabs(lng) < COORD_EPS;
+}
+
+bool Tracker::isHomeCoordinate(double lat, double lng) const {
+    return fabs(lat - TRACKER_HOME_LAT) < COORD_EPS &&
+           fabs(lng - TRACKER_HOME_LNG) < COORD_EPS;
+}
+
+bool Tracker::isPinCandidateCoordinate(double lat, double lng) const {
+    if (isZeroCoordinate(lat, lng)) {
+        return false;
+    }
+    if (isHomeCoordinate(lat, lng)) {
+        return false;
+    }
+    return true;
+}
+
+void Tracker::storeLastKnownGood(double lat, double lng, float bearing) {
+    if (isZeroCoordinate(lat, lng)) {
+        return;
+    }
+    if (isHomeCoordinate(lat, lng)) {
+        return;
+    }
+
+    hasLastKnownGood = true;
+    lastKnownGoodLat = lat;
+    lastKnownGoodLng = lng;
+    lastKnownGoodBearing = bearing;
 }
 
 void Tracker::begin() {
@@ -207,16 +241,15 @@ void Tracker::update() {
     bool rawMoving = gpsMoving;
 #endif
 
-    // Антидребезг руху: короткі спайки не скидають stationary timer
     static unsigned long movingCandidateSince = 0;
     static bool moving = false;
-    static constexpr unsigned long MOVING_CONFIRM_MS = 5000;
 
     if (rawMoving) {
         if (movingCandidateSince == 0) {
             movingCandidateSince = millis();
             Serial.println("[Tracker] movement candidate started");
         }
+
         if (!moving && millis() - movingCandidateSince >= MOVING_CONFIRM_MS) {
             moving = true;
             Serial.println("[Tracker] movement confirmed");
@@ -244,16 +277,71 @@ void Tracker::update() {
 
     double lat = 0.0;
     double lng = 0.0;
+    bool isInvalidCoordinates = false;
+    bool hasUsableCoordinates = false;
+
+    float currentBearing = gps.getBearing();
 
     if (gpsValid) {
         lat = gps.getLatitude();
         lng = gps.getLongitude();
-    } else if (_pinned) {
-        lat = _pinLat;
-        lng = _pinLng;
-    }
 
-    bool isInvalidCoordinates = false;
+        if (ENABLE_HOME_POINT_FILTERING) {
+            float rawDist = distanceTo(lat, lng, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
+            Serial.printf("[Tracker] raw dist to home: %.1f km, limit: %.1f km\n",
+                          rawDist / 1000.0f, (float)TRACKER_HOME_RADIUS_KM);
+
+            if (rawDist / 1000.0f > TRACKER_HOME_RADIUS_KM) {
+                Serial.printf("[Tracker] GPS garbage detected: %.6f, %.6f\n", lat, lng);
+                isInvalidCoordinates = true;
+
+                if (hasLastKnownGood) {
+                    lat = lastKnownGoodLat;
+                    lng = lastKnownGoodLng;
+                    currentBearing = lastKnownGoodBearing;
+                    hasUsableCoordinates = true;
+                    Serial.printf("[Tracker] using last known good: %.6f, %.6f\n", lat, lng);
+                } else if (battery.isLow()) {
+                    lat = TRACKER_HOME_LAT;
+                    lng = TRACKER_HOME_LNG;
+                    hasUsableCoordinates = true;
+                    Serial.println("[Tracker] no last known good, low battery -> using HOME");
+                } else {
+                    lat = 0.0;
+                    lng = 0.0;
+                    hasUsableCoordinates = false;
+                    Serial.println("[Tracker] garbage GPS dropped");
+                }
+            } else {
+                hasUsableCoordinates = !isZeroCoordinate(lat, lng);
+                if (hasUsableCoordinates) {
+                    storeLastKnownGood(lat, lng, currentBearing);
+                }
+            }
+        } else {
+            hasUsableCoordinates = !isZeroCoordinate(lat, lng);
+            if (hasUsableCoordinates) {
+                storeLastKnownGood(lat, lng, currentBearing);
+            }
+        }
+    } else {
+        isInvalidCoordinates = true;
+
+        if (hasLastKnownGood) {
+            lat = lastKnownGoodLat;
+            lng = lastKnownGoodLng;
+            currentBearing = lastKnownGoodBearing;
+            hasUsableCoordinates = true;
+            Serial.printf("[Tracker] GPS unavailable, using last known good: %.6f, %.6f\n", lat, lng);
+        } else if (battery.isLow()) {
+            lat = TRACKER_HOME_LAT;
+            lng = TRACKER_HOME_LNG;
+            hasUsableCoordinates = true;
+            Serial.println("[Tracker] GPS unavailable, low battery -> using HOME");
+        } else {
+            Serial.println("[Tracker] GPS unavailable, no cached point");
+        }
+    }
 
 #if ENABLE_PARKING_FILTER
     parkingApply(lat, lng, speed, moving);
@@ -268,7 +356,6 @@ void Tracker::update() {
         }
     }
 
-    // Deep sleep перевіряємо ДО shouldSend(), інакше sleep може не настати вчасно
     if (!moving && _stationarySince > 0) {
         unsigned long stationaryMs = millis() - _stationarySince;
         if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
@@ -284,24 +371,24 @@ void Tracker::update() {
             }
 
             float spd  = 0.0f;
-            float bear = gps.getBearing();
+            float bear = currentBearing;
 #if ENABLE_IMU
             float accel = imu.getAccelMag();
 #else
             float accel = 0.0f;
 #endif
 
-            if (lat != 0.0 || lng != 0.0) {
+            if (hasUsableCoordinates) {
                 Serial.println("[Tracker] sending last position before sleep...");
                 if (ensureWifi()) {
-                    sendToServer(lat, lng, spd, bear, accel, false);
+                    sendToServer(lat, lng, spd, bear, accel, isInvalidCoordinates);
                     delay(500);
                     releaseWifi();
                 } else {
-                    saveToBlackbox(lat, lng, spd, bear, accel, false);
+                    saveToBlackbox(lat, lng, spd, bear, accel, isInvalidCoordinates);
                 }
             } else {
-                Serial.println("[Tracker] no valid coords for final send before sleep");
+                Serial.println("[Tracker] no usable coordinates before sleep");
             }
 
             esp_sleep_enable_timer_wakeup(sleepUs);
@@ -318,74 +405,23 @@ void Tracker::update() {
 
     lastSentAt = millis();
 
-    if (!gpsValid && !_pinned) {
-        Serial.println("[Tracker] GPS invalid and no pin yet, skip send");
+    if (!hasUsableCoordinates && !_pinned) {
+        Serial.println("[Tracker] no usable coordinates -> skip send");
         return;
-    }
-
-    if (ENABLE_HOME_POINT_FILTERING) {
-        float dist = distanceTo(lat, lng, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
-        Serial.printf("[Tracker] dist to home: %.1f km, limit: %.1f km\n",
-                      dist / 1000.0f, (float)TRACKER_HOME_RADIUS_KM);
-        if (dist / 1000.0f > TRACKER_HOME_RADIUS_KM) {
-#if ENABLE_WIFI_POSITIONING
-            Serial.println("[Tracker] coordinates outside home zone, trying WiFi positioning...");
-            if (ensureWifi()) {
-                WifiPosition wpos = wifiPositioning.locate();
-                if (wpos.valid) {
-                    Serial.print("[Tracker] WiFi position found, accuracy=");
-                    Serial.println(wpos.accuracy);
-                    lat = wpos.lat;
-                    lng = wpos.lng;
-                } else {
-                    Serial.println("[Tracker] WiFi positioning failed, using fallback");
-                    if (battery.isLow()) {
-                        Serial.println("[Tracker] low battery, falling back to home coords");
-                        lat = TRACKER_HOME_LAT;
-                        lng = TRACKER_HOME_LNG;
-                    } else {
-                        lat = SENDING_LAT;
-                        lng = SENDING_LNG;
-                    }
-                    isInvalidCoordinates = true;
-                }
-            } else {
-                if (battery.isLow()) {
-                    Serial.println("[Tracker] low battery, falling back to home coords");
-                    lat = TRACKER_HOME_LAT;
-                    lng = TRACKER_HOME_LNG;
-                } else {
-                    lat = SENDING_LAT;
-                    lng = SENDING_LNG;
-                }
-                isInvalidCoordinates = true;
-            }
-#else
-            if (battery.isLow()) {
-                Serial.println("[Tracker] low battery, falling back to home coords");
-                lat = TRACKER_HOME_LAT;
-                lng = TRACKER_HOME_LNG;
-            } else {
-                lat = SENDING_LAT;
-                lng = SENDING_LNG;
-            }
-            isInvalidCoordinates = true;
-#endif
-        }
     }
 
     if (isInvalidCoordinates) {
         speed = 0.0f;
-        if (WiFi.status() == WL_CONNECTED) {
-            sendToServer(lat, lng, speed, gps.getBearing(), 0.0f, true);
+        if (ensureWifi()) {
+            sendToServer(lat, lng, speed, currentBearing, 0.0f, true);
+            releaseWifi();
         } else {
-            saveToBlackbox(lat, lng, speed, gps.getBearing(), 0.0f, true);
+            saveToBlackbox(lat, lng, speed, currentBearing, 0.0f, true);
         }
-        releaseWifi();
         return;
     }
 
-    float bearing = gps.getBearing();
+    float bearing = currentBearing;
     if (lastBearing < 0.0f) {
         lastBearing = bearing;
     }
@@ -407,10 +443,10 @@ void Tracker::update() {
             if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
                 startFlush();
             } else {
-                sendToServer(lat, lng, speed, bearing, accel, isInvalidCoordinates);
+                sendToServer(lat, lng, speed, bearing, accel, false);
             }
         } else {
-            saveToBlackbox(lat, lng, speed, bearing, accel, isInvalidCoordinates);
+            saveToBlackbox(lat, lng, speed, bearing, accel, false);
         }
     } else {
         if (ensureWifi()) {
@@ -420,11 +456,11 @@ void Tracker::update() {
             if (LittleFS.exists(TRACKER_BLACKBOX_PATH)) {
                 startFlush();
             } else {
-                sendToServer(lat, lng, speed, bearing, accel, isInvalidCoordinates);
+                sendToServer(lat, lng, speed, bearing, accel, false);
                 releaseWifi();
             }
         } else {
-            saveToBlackbox(lat, lng, speed, bearing, accel, isInvalidCoordinates);
+            saveToBlackbox(lat, lng, speed, bearing, accel, false);
         }
     }
 
@@ -446,7 +482,7 @@ unsigned long Tracker::currentInterval() {
     float bearing = gps.getBearing();
 
     if (speed > TRACKER_MAX_VALID_SPEED) {
-        speed = 0.0;
+        speed = 0.0f;
     }
 
     if (speed < TRACKER_SPEED_THRESHOLD) {
@@ -499,12 +535,22 @@ String Tracker::buildUrl(double lat, double lng, float speed, float bearing,
     url += "&accel=";
     url += String(accel, 3);
     url += "&invalid=";
-    url += invalid ? "1" : "0";
+    url += invalid ? "true" : "false";
     return url;
 }
 
 void Tracker::sendToServer(double lat, double lng, float speed, float bearing,
                            float accel, bool invalid) {
+    if (isZeroCoordinate(lat, lng)) {
+        Serial.printf("[Tracker] zero coordinates blocked, skip send: %.6f, %.6f\n", lat, lng);
+        return;
+    }
+
+    if (isHomeCoordinate(lat, lng) && !battery.isLow()) {
+        Serial.printf("[Tracker] HOME blocked, battery OK: %.6f, %.6f\n", lat, lng);
+        return;
+    }
+
     unsigned long timestamp = getSafeTimestamp(invalid);
 
     String url = buildUrl(lat, lng, speed, bearing, timestamp,
@@ -545,6 +591,16 @@ void Tracker::sendToServer(double lat, double lng, float speed, float bearing,
 
 void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
                              float accel, bool invalid) {
+    if (isZeroCoordinate(lat, lng)) {
+        Serial.printf("[Tracker] zero coordinates blocked, skip blackbox: %.6f, %.6f\n", lat, lng);
+        return;
+    }
+
+    if (isHomeCoordinate(lat, lng) && !battery.isLow()) {
+        Serial.printf("[Tracker] HOME blocked, skip blackbox: %.6f, %.6f\n", lat, lng);
+        return;
+    }
+
     size_t freeBytes = LittleFS.totalBytes() - LittleFS.usedBytes();
 
     if (freeBytes < TRACKER_BLACKBOX_MIN_FREE) {
@@ -619,7 +675,10 @@ void Tracker::flushNextLine() {
     int i10 = line.indexOf(',', i9 + 1);
 
     if (i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0 || i4 < 0 ||
-        i5 < 0 || i6 < 0 || i7 < 0 || i8 < 0 || i9 < 0 || i10 < 0) return;
+        i5 < 0 || i6 < 0 || i7 < 0 || i8 < 0 || i9 < 0 || i10 < 0) {
+        Serial.println("[Tracker] flush line malformed, skipped");
+        return;
+    }
 
     unsigned long timestamp = line.substring(0, i0).toInt();
     double lat          = line.substring(i0 + 1, i1).toDouble();
@@ -633,6 +692,16 @@ void Tracker::flushNextLine() {
     uint32_t freeKb     = line.substring(i8 + 1, i9).toInt();
     float accel         = line.substring(i9 + 1, i10).toFloat();
     bool invalid        = line.substring(i10 + 1).toInt() == 1;
+
+    if (isZeroCoordinate(lat, lng)) {
+        Serial.printf("[Tracker] flush skipped zero coordinates: %.6f, %.6f\n", lat, lng);
+        return;
+    }
+
+    if (isHomeCoordinate(lat, lng) && !battery.isLow()) {
+        Serial.printf("[Tracker] flush skipped HOME coordinates: %.6f, %.6f\n", lat, lng);
+        return;
+    }
 
     String url = buildUrl(lat, lng, speed, bearing, timestamp,
                           voltage, altitude, satellites, hdop, freeKb, accel, invalid);
@@ -675,9 +744,14 @@ bool Tracker::parkingIsMoving() const {
 
     uint8_t movingCount = 0;
     for (uint8_t i = 0; i < total; i++) {
-        if (_speedWindow[i] >= TRACKER_SPEED_THRESHOLD) movingCount++;
+        if (_speedWindow[i] >= TRACKER_SPEED_THRESHOLD) {
+            movingCount++;
+        }
     }
-    if (movingCount < PARKING_MOTION_MIN_MOVING) return false;
+
+    if (movingCount < PARKING_MOTION_MIN_MOVING) {
+        return false;
+    }
 
     uint8_t idxCurr = (_speedWindowIdx + PARKING_WINDOW_SIZE - 1) % PARKING_WINDOW_SIZE;
     uint8_t idxPrev = (_speedWindowIdx + PARKING_WINDOW_SIZE - 2) % PARKING_WINDOW_SIZE;
@@ -686,7 +760,9 @@ bool Tracker::parkingIsMoving() const {
     float prevSpeed = _speedWindow[idxPrev];
 
     float intervalSec = (float)_lastIntervalMs / 1000.0f;
-    if (intervalSec < 0.1f) intervalSec = 0.1f;
+    if (intervalSec < 0.1f) {
+        intervalSec = 0.1f;
+    }
 
     float accel = fabs(currSpeed - prevSpeed) / intervalSec;
 
@@ -719,6 +795,12 @@ void Tracker::parkingApply(double& lat, double& lng, float& speed, bool moving) 
 
     if (!_pinned) {
         if (stationaryMs >= (unsigned long)PARKING_PIN_DELAY_SEC * 1000UL) {
+            if (!isPinCandidateCoordinate(lat, lng)) {
+                Serial.printf("[Parking] pin skipped for blocked coordinates: %.6f, %.6f\n", lat, lng);
+                speed = 0.0f;
+                return;
+            }
+
             _pinLat = lat;
             _pinLng = lng;
             _pinned = true;
@@ -826,7 +908,9 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
             unsigned long ntpTime = (unsigned long)mktime(&timeinfo)
                                     + timezoneSync.getOffsetSec();
             if (ntpTime >= MIN_VALID_TIME && ntpTime <= MAX_VALID_TIME) {
-                if (!invalid) lastValidUnixTime = ntpTime;
+                if (!invalid) {
+                    lastValidUnixTime = ntpTime;
+                }
                 return ntpTime;
             }
             Serial.print("[Tracker] suspicious NTP time rejected: ");

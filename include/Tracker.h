@@ -45,6 +45,8 @@ private:
     float         lastBearing = -1.0f;
 
     static constexpr unsigned long ONE_YEAR_SECONDS = 365UL * 24 * 3600;
+    static constexpr double COORD_EPS = 0.000001;
+    static constexpr unsigned long MOVING_CONFIRM_MS = 5000UL;
 
     unsigned long lastValidUnixTime = 0;
     bool          timeSynced        = false;
@@ -56,6 +58,12 @@ private:
     unsigned long wifiOnAt           = 0;
     unsigned long lastWifiFailAt     = 0;
     bool          lastConnectSuccess = false;
+
+    // last known good position cache
+    bool  hasLastKnownGood    = false;
+    double lastKnownGoodLat   = 0.0;
+    double lastKnownGoodLng   = 0.0;
+    float lastKnownGoodBearing = 0.0f;
 
 #if ENABLE_WIFI_POSITIONING
     WifiPositioning wifiPositioning;
@@ -107,4 +115,9 @@ private:
     float         distanceTo(double lat1, double lng1, double lat2, double lng2);
     unsigned long getSafeTimestamp(bool invalid);
     void          syncTimeNTP();
+
+    bool isZeroCoordinate(double lat, double lng) const;
+    bool isHomeCoordinate(double lat, double lng) const;
+    bool isPinCandidateCoordinate(double lat, double lng) const;
+    void storeLastKnownGood(double lat, double lng, float bearing);
 };
