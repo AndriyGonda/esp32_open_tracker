@@ -288,8 +288,6 @@ void Tracker::update() {
 
         if (ENABLE_HOME_POINT_FILTERING) {
             float rawDist = distanceTo(lat, lng, TRACKER_HOME_LAT, TRACKER_HOME_LNG);
-            Serial.printf("[Tracker] raw dist to home: %.1f km, limit: %.1f km\n",
-                          rawDist / 1000.0f, (float)TRACKER_HOME_RADIUS_KM);
 
             if (rawDist / 1000.0f > TRACKER_HOME_RADIUS_KM) {
                 Serial.printf("[Tracker] GPS garbage detected: %.6f, %.6f\n", lat, lng);
@@ -818,9 +816,6 @@ void Tracker::parkingApply(double& lat, double& lng, float& speed, bool moving) 
         lng   = _pinLng;
         speed = 0.0f;
     } else {
-        Serial.print("[Parking] drift anomaly ignored: ");
-        Serial.print(drift);
-        Serial.println(" m");
         lat   = _pinLat;
         lng   = _pinLng;
         speed = 0.0f;
