@@ -354,48 +354,49 @@ void Tracker::update() {
         }
     }
 
-    if (!moving && _stationarySince > 0) {
-        unsigned long stationaryMs = millis() - _stationarySince;
-        if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
-            uint64_t sleepUs = (uint64_t)PARKING_SLEEP_DURATION_MS * 1000ULL;
+// Temporary disable deep sleep for esp32 c3 TODO: need fix for interrupt wakeup
+//     if (!moving && _stationarySince > 0) {
+//         unsigned long stationaryMs = millis() - _stationarySince;
+//         if (stationaryMs >= PARKING_SLEEP_DELAY_MS) {
+//             uint64_t sleepUs = (uint64_t)PARKING_SLEEP_DURATION_MS * 1000ULL;
 
-            Serial.printf("[Tracker] stationary for %lu min, sleeping for %llu min\n",
-                          stationaryMs / 60000UL,
-                          sleepUs / 60000000ULL);
+//             Serial.printf("[Tracker] stationary for %lu min, sleeping for %llu min\n",
+//                           stationaryMs / 60000UL,
+//                           sleepUs / 60000000ULL);
 
-            if (flushing) {
-                flushFile.close();
-                flushing = false;
-            }
+//             if (flushing) {
+//                 flushFile.close();
+//                 flushing = false;
+//             }
 
-            float spd  = 0.0f;
-            float bear = currentBearing;
-#if ENABLE_IMU
-            float accel = imu.getAccelMag();
-#else
-            float accel = 0.0f;
-#endif
+//             float spd  = 0.0f;
+//             float bear = currentBearing;
+// #if ENABLE_IMU
+//             float accel = imu.getAccelMag();
+// #else
+//             float accel = 0.0f;
+// #endif
 
-            if (hasUsableCoordinates) {
-                Serial.println("[Tracker] sending last position before sleep...");
-                if (ensureWifi()) {
-                    sendToServer(lat, lng, spd, bear, accel, isInvalidCoordinates);
-                    delay(500);
-                    releaseWifi();
-                } else {
-                    saveToBlackbox(lat, lng, spd, bear, accel, isInvalidCoordinates);
-                }
-            } else {
-                Serial.println("[Tracker] no usable coordinates before sleep");
-            }
+//             if (hasUsableCoordinates) {
+//                 Serial.println("[Tracker] sending last position before sleep...");
+//                 if (ensureWifi()) {
+//                     sendToServer(lat, lng, spd, bear, accel, isInvalidCoordinates);
+//                     delay(500);
+//                     releaseWifi();
+//                 } else {
+//                     saveToBlackbox(lat, lng, spd, bear, accel, isInvalidCoordinates);
+//                 }
+//             } else {
+//                 Serial.println("[Tracker] no usable coordinates before sleep");
+//             }
 
-            esp_sleep_enable_timer_wakeup(sleepUs);
-            Serial.printf("[Tracker] deep sleep for %llu min, wakeup on motion or timer\n",
-                          sleepUs / 60000000ULL);
-            delay(100);
-            esp_deep_sleep_start();
-        }
-    }
+//             esp_sleep_enable_timer_wakeup(sleepUs);
+//             Serial.printf("[Tracker] deep sleep for %llu min, wakeup on motion or timer\n",
+//                           sleepUs / 60000000ULL);
+//             delay(100);
+//             esp_deep_sleep_start();
+//         }
+//     }
 
     if (!shouldSend()) {
         return;

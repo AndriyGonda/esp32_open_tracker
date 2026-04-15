@@ -9,7 +9,7 @@
 #define MIN_SATELLITES 6
 
 // Sending intervals
-#define TRACKER_INTERVAL_STATIC   300000   // 5 minutes idle
+#define TRACKER_INTERVAL_STATIC   600000   // 10 minutes idle
 #define TRACKER_INTERVAL_MOVING    10000   // moving
 #define TRACKER_INTERVAL_TURNING    2000   // rotation
 
@@ -51,15 +51,15 @@
 
 // --- Position pinning ---
 // Seconds the device must remain stationary before the anchor is set.
-#define PARKING_PIN_DELAY_SEC         30
+#define PARKING_PIN_DELAY_SEC         60
 
 // Maximum drift (meters) allowed while pinned.
-#define PARKING_PIN_RADIUS_M          5.0f
+#define PARKING_PIN_RADIUS_M          30.0f
 
 
 // --- Motion consensus (sliding window) ---
 // How many consecutive GPS readings to keep in the window.
-#define PARKING_WINDOW_SIZE           5
+#define PARKING_WINDOW_SIZE           6
 
 
 // before the tracker accepts "moving" state.
@@ -82,13 +82,14 @@
 //   FUSION_IMU – IMU only, ignore GPS speed  (for testing)
 #define IMU_FUSION_STRATEGY           FUSION_AND
 
-#define IMU_INT_PIN  2
+//#define IMU_INT_PIN  2 TODO: need fix on hardware level
 
+// TODO: temporary disabled. Need hardware fix
 // How long the device must be stationary before sleep is considered (ms)
-// 10 minutes = 600000
+// 1 minutes = 6000000
 #define PARKING_SLEEP_DELAY_MS      600000UL
 
 
 // How long to sleep when stationary (ms)
-// 10 minutes = 600000
-#define PARKING_SLEEP_DURATION_MS   600000UL
+// 1 minutes = 60000 (make it minimal for esp32 c3)
+#define PARKING_SLEEP_DURATION_MS   60000UL
