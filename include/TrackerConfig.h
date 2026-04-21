@@ -9,7 +9,7 @@
 #define MIN_SATELLITES 6
 
 // Sending intervals
-#define TRACKER_INTERVAL_STATIC   60000   // 10 minutes idle
+#define TRACKER_INTERVAL_STATIC   600000   // 10 minutes idle
 #define TRACKER_INTERVAL_MOVING    10000   // moving
 #define TRACKER_INTERVAL_TURNING    2000   // rotation
 
