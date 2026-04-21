@@ -9,7 +9,7 @@
 #define MIN_SATELLITES 6
 
 // Sending intervals
-#define TRACKER_INTERVAL_STATIC   60000   // 10 minutes idle
+#define TRACKER_INTERVAL_STATIC   600000   // 10 minutes idle
 #define TRACKER_INTERVAL_MOVING    10000   // moving
 #define TRACKER_INTERVAL_TURNING    2000   // rotation
 
@@ -74,7 +74,7 @@
 #define GPS_WAKE_SETTLE_MS             5000UL
 #define GPS_STALE_DATA_MS              3000UL
 #define GPS_MIN_AWAKE_AFTER_WAKE_MS    700000UL
-#define GPS_SLEEP_AFTER_IMU_STILL_MS   600000UL
+#define GPS_SLEEP_AFTER_IMU_STILL_MS   700000UL
 
 // ---- IMU (BMI160) motion assist ----
 #define ENABLE_IMU                    true
