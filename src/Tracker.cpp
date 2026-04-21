@@ -5,8 +5,8 @@
 #include <esp_sleep.h>
 #include "Tracker.h"
 
-Tracker::Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led)
-    : gps(gps), settings(settings), battery(battery), portal(portal), led(led) {
+Tracker::Tracker(GpsReader& gps, ImuReader& imu, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led)
+    : gps(gps), imu(imu), settings(settings), battery(battery), portal(portal), led(led) {
 }
 
 bool Tracker::isZeroCoordinate(double lat, double lng) const {
@@ -271,13 +271,15 @@ void Tracker::update() {
         return;
     }
 
+    float accel = imu.isReady() ? imu.getAccelMag() : 0.0f;
+
     if (isInvalidCoordinates) {
         speed = 0.0f;
         if (ensureWifi()) {
-            sendToServer(lat, lng, speed, currentBearing, 0.0f, true);
+            sendToServer(lat, lng, speed, currentBearing, accel, true);
             releaseWifi();
         } else {
-            saveToBlackbox(lat, lng, speed, currentBearing, 0.0f, true);
+            saveToBlackbox(lat, lng, speed, currentBearing, accel, true);
         }
         return;
     }
@@ -286,8 +288,6 @@ void Tracker::update() {
     if (lastBearing < 0.0f) {
         lastBearing = bearing;
     }
-
-    float accel = 0.0f;
 
     if (moving) {
         if (lastConnectSuccess && WiFi.status() != WL_CONNECTED) {

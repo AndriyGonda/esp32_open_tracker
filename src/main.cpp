@@ -32,7 +32,7 @@ PowerManager powerManager(batteryMonitor);
 GpsReader gpsReader(3, 4);
 ImuReader imuReader(IMU_SDA_PIN, IMU_SCL_PIN);
 GpsPowerManager gpsPowerManager(gpsReader, imuReader);
-Tracker tracker(gpsReader, appSettings, batteryMonitor, configPortal, ledController);
+Tracker tracker(gpsReader, imuReader, appSettings, batteryMonitor, configPortal, ledController);
 
 static void printLoadedSettings() {
     Serial.println();
