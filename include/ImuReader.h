@@ -10,6 +10,7 @@ public:
     bool begin();
     void update();
     void enableMotionInterrupt(uint8_t intPin);
+
     bool isMoving() const { return _moving; }
     bool isReady() const { return _ok && _baselineReady; }
     float getAccelMag() const { return _accelMag; }
@@ -40,6 +41,9 @@ private:
     uint8_t       _reinitCount    = 0;
     static constexpr uint8_t MAX_ZERO_READS   = 3;
     static constexpr uint8_t MAX_REINIT_COUNT = 5;
+
+    unsigned long _lastRetryMs = 0;
+    static constexpr unsigned long RETRY_INTERVAL_MS = 20000UL; // 20 sec
 
     bool reinit();
     bool writeReg(uint8_t reg, uint8_t val);

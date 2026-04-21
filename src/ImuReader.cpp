@@ -17,7 +17,11 @@ bool ImuReader::begin() {
     uint8_t err = Wire.endTransmission();
     Serial.print("[IMU] ping: ");
     Serial.println(err == 0 ? "OK" : "FAIL");
-    if (err != 0) return false;
+    if (err != 0) {
+        _ok = false;
+        _lastRetryMs = millis();
+        return false;
+    }
 
     Wire.beginTransmission(BMI160_ADDR);
     Wire.write(0x00);
@@ -26,21 +30,36 @@ bool ImuReader::begin() {
     Wire.requestFrom((uint8_t)BMI160_ADDR, (uint8_t)1);
     if (!Wire.available()) {
         Serial.println("[IMU] chip ID read failed");
+        _ok = false;
+        _lastRetryMs = millis();
         return false;
     }
+
     uint8_t id = Wire.read();
     Serial.printf("[IMU] chip ID: 0x%02X\n", id);
     if (id != 0xD1) {
         Serial.println("[IMU] unexpected chip ID");
+        _ok = false;
+        _lastRetryMs = millis();
         return false;
     }
 
-    writeReg(0x7E, 0xB6);
+    writeReg(0x7E, 0xB6); // soft reset
     delay(500);
-    writeReg(0x7E, 0x11);
+    writeReg(0x7E, 0x11); // accel normal mode
     delay(200);
 
     _ok = true;
+    _zeroCount = 0;
+    _reinitCount = 0;
+    _baselineReady = false;
+    _baselineCount = 0;
+    _winIdx = 0;
+    _winFull = false;
+    _accelMag = 0.0f;
+    _moving = false;
+    _gx = 0; _gy = 0; _gz = 9.81f;
+
     Serial.println("[IMU] BMI160 ready");
     return true;
 }
@@ -64,8 +83,9 @@ void ImuReader::enableMotionInterrupt(uint8_t intPin) {
 
 bool ImuReader::reinit() {
     if (_reinitCount >= MAX_REINIT_COUNT) {
-        Serial.println("[IMU] max reinit attempts reached, giving up");
+        Serial.println("[IMU] max reinit attempts reached, switching to delayed retry mode");
         _ok = false;
+        _lastRetryMs = millis();
         return false;
     }
 
@@ -81,48 +101,52 @@ bool ImuReader::reinit() {
     _moving        = false;
     _gx = 0; _gy = 0; _gz = 9.81f;
 
-    writeReg(0x7E, 0xB6);
-    delay(500);
-
-    Wire.beginTransmission(BMI160_ADDR);
-    Wire.write(0x00);
-    Wire.endTransmission(false);
-    delay(2);
-    Wire.requestFrom((uint8_t)BMI160_ADDR, (uint8_t)1);
-    if (!Wire.available()) {
-        Serial.println("[IMU] reinit: chip ID read failed");
-        return false;
+    bool ok = begin();
+    if (!ok) {
+        Serial.println("[IMU] reinit failed");
+    } else {
+        Serial.println("[IMU] reinit OK");
     }
-    uint8_t id = Wire.read();
-    if (id != 0xD1) {
-        Serial.printf("[IMU] reinit: unexpected chip ID 0x%02X\n", id);
-        return false;
-    }
-
-    writeReg(0x7E, 0x11);
-    delay(200);
-
-    Serial.println("[IMU] reinit OK");
-    return true;
+    return ok;
 }
 
 void ImuReader::update() {
-    if (!_ok) return;
-
     unsigned long now = millis();
+
+    if (!_ok) {
+        if (now - _lastRetryMs >= RETRY_INTERVAL_MS) {
+            _lastRetryMs = now;
+            Serial.println("[IMU] device offline, retrying init...");
+            begin();
+        }
+        return;
+    }
+
     if (now - _lastReadMs < READ_INTERVAL_MS) return;
     _lastReadMs = now;
 
     float ax, ay, az;
-    if (!readAccel(ax, ay, az)) return;
+    if (!readAccel(ax, ay, az)) {
+        Serial.println("[IMU] read failed, marking offline");
+        _ok = false;
+        _accelMag = 0.0f;
+        _moving = false;
+        _baselineReady = false;
+        _lastRetryMs = now;
+        return;
+    }
 
     if (ax == 0.0f && ay == 0.0f && az == 0.0f) {
         _zeroCount++;
         Serial.printf("[IMU] zero read %d/%d\n", _zeroCount, MAX_ZERO_READS);
 
         if (_zeroCount >= MAX_ZERO_READS) {
-            Serial.println("[IMU] too many zero reads, reinitializing...");
-            reinit();
+            Serial.println("[IMU] too many zero reads, marking IMU offline");
+            _ok = false;
+            _accelMag = 0.0f;
+            _moving = false;
+            _baselineReady = false;
+            _lastRetryMs = now;
         }
         return;
     }
