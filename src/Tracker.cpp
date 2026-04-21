@@ -5,8 +5,8 @@
 #include <esp_sleep.h>
 #include "Tracker.h"
 
-Tracker::Tracker(GpsReader& gps, ImuReader& imu, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led)
-    : gps(gps), imu(imu), settings(settings), battery(battery), portal(portal), led(led) {
+Tracker::Tracker(GpsReader& gps, AppSettings& settings, BatteryMonitor& battery, ConfigPortal& portal, LedController& led)
+    : gps(gps), settings(settings), battery(battery), portal(portal), led(led) {
 }
 
 bool Tracker::isZeroCoordinate(double lat, double lng) const {
@@ -19,14 +19,22 @@ bool Tracker::isHomeCoordinate(double lat, double lng) const {
 }
 
 bool Tracker::isPinCandidateCoordinate(double lat, double lng) const {
-    if (isZeroCoordinate(lat, lng)) return false;
-    if (isHomeCoordinate(lat, lng)) return false;
+    if (isZeroCoordinate(lat, lng)) {
+        return false;
+    }
+    if (isHomeCoordinate(lat, lng)) {
+        return false;
+    }
     return true;
 }
 
 void Tracker::storeLastKnownGood(double lat, double lng, float bearing) {
-    if (isZeroCoordinate(lat, lng)) return;
-    if (isHomeCoordinate(lat, lng)) return;
+    if (isZeroCoordinate(lat, lng)) {
+        return;
+    }
+    if (isHomeCoordinate(lat, lng)) {
+        return;
+    }
 
     hasLastKnownGood = true;
     lastKnownGoodLat = lat;
@@ -44,6 +52,26 @@ void Tracker::begin() {
     Serial.print(LittleFS.totalBytes() / 1024);
     Serial.println(" KB");
 
+#if ENABLE_IMU
+    bool imuOk = false;
+    for (uint8_t attempt = 1; attempt <= 3; attempt++) {
+        Serial.printf("[Tracker] IMU init attempt %d/3\n", attempt);
+        if (imu.begin()) {
+            imu.setThreshold(IMU_ACCEL_THRESHOLD);
+#ifdef IMU_INT_PIN
+            imu.enableMotionInterrupt(IMU_INT_PIN);
+#endif
+            Serial.println("[Tracker] IMU ready");
+            imuOk = true;
+            break;
+        }
+        delay(1000);
+    }
+    if (!imuOk) {
+        Serial.println("[Tracker] IMU init failed, working without IMU");
+    }
+#endif
+
     syncTimeNTP();
 }
 
@@ -53,7 +81,8 @@ bool Tracker::ensureWifi() {
         return true;
     }
 
-    if (lastWifiFailAt > 0 && millis() - lastWifiFailAt < WIFI_RETRY_INTERVAL_MS) {
+    if (lastWifiFailAt > 0 &&
+        millis() - lastWifiFailAt < WIFI_RETRY_INTERVAL_MS) {
         Serial.print("[Tracker] WiFi skip (recent fail), retry in ");
         Serial.print((WIFI_RETRY_INTERVAL_MS - (millis() - lastWifiFailAt)) / 1000);
         Serial.println(" sec");
@@ -87,12 +116,14 @@ bool Tracker::ensureWifi() {
         WiFi.begin(ssid.c_str(), wifi.password.c_str());
 
         unsigned long startedAt = millis();
-        while (millis() - startedAt < 10000 && millis() - wifiStart < WIFI_TOTAL_TIMEOUT_MS) {
+        while (millis() - startedAt < 10000 &&
+               millis() - wifiStart < WIFI_TOTAL_TIMEOUT_MS) {
             if (WiFi.status() == WL_CONNECTED) {
                 connected = true;
                 break;
             }
-            if (WiFi.status() == WL_CONNECT_FAILED || WiFi.status() == WL_NO_SSID_AVAIL) {
+            if (WiFi.status() == WL_CONNECT_FAILED ||
+                WiFi.status() == WL_NO_SSID_AVAIL) {
                 break;
             }
             delay(100);
@@ -135,16 +166,6 @@ void Tracker::releaseWifi() {
     wifiManagedByUs = false;
 }
 
-unsigned long Tracker::currentInterval(bool moving, float currentBearing) const {
-    if (!moving) return TRACKER_INTERVAL_STATIC;
-
-    if (lastBearing >= 0.0f && bearingDiff(lastBearing, currentBearing) >= TRACKER_BEARING_THRESHOLD) {
-        return TRACKER_INTERVAL_TURNING;
-    }
-
-    return TRACKER_INTERVAL_MOVING;
-}
-
 void Tracker::update() {
     if (portal.isActive()) {
         if (flushing) {
@@ -168,19 +189,78 @@ void Tracker::update() {
     }
 
     const bool gpsValid =
-        gps.hasLocation() &&
-        gps.getHdop() <= MAX_HDOP &&
-        gps.getSatellites() >= MIN_SATELLITES;
+            gps.hasLocation() &&
+            gps.getHdop() <= MAX_HDOP &&
+            gps.getSatellites() >= MIN_SATELLITES;
 
     float speed = gpsValid ? gps.getSpeed() : 0.0f;
-    if (speed > TRACKER_MAX_VALID_SPEED) speed = 0.0f;
+    if (speed > TRACKER_MAX_VALID_SPEED) {
+        speed = 0.0f;
+    }
+
+#if ENABLE_IMU
+    imu.update();
+
+    static unsigned long lastImuPrint = 0;
+    if (millis() - lastImuPrint >= 2000) {
+        lastImuPrint = millis();
+        Serial.printf("[IMU] accel=%.3f m/s²  motion=%s  ready=%s\n",
+            imu.getAccelMag(),
+            imu.isMoving() ? "YES" : "NO",
+            imu.isReady() ? "YES" : "NO");
+    }
+
+    if (imu.isReady() && !imu.isMoving()) {
+        speed = 0.0f;
+    }
+#endif
 
 #if ENABLE_PARKING_FILTER
     parkingFilterUpdate(speed);
-    bool moving = gpsValid ? parkingIsMoving() : false;
+    bool gpsMoving = gpsValid ? parkingIsMoving() : false;
 #else
-    bool moving = gpsValid && (speed >= TRACKER_SPEED_THRESHOLD);
+    bool gpsMoving = gpsValid && (speed >= TRACKER_SPEED_THRESHOLD);
 #endif
+
+#if ENABLE_IMU
+    bool imuSays  = imu.isMoving();
+    bool imuReady = imu.isReady();
+    bool rawMoving;
+    if (!imuReady) {
+        rawMoving = gpsMoving;
+    } else if (IMU_FUSION_STRATEGY == FUSION_AND) {
+        rawMoving = gpsMoving && imuSays;
+    } else if (IMU_FUSION_STRATEGY == FUSION_OR) {
+        rawMoving = gpsMoving || imuSays;
+    } else if (IMU_FUSION_STRATEGY == FUSION_IMU) {
+        rawMoving = imuSays;
+    } else {
+        rawMoving = gpsMoving;
+    }
+#else
+    bool rawMoving = gpsMoving;
+#endif
+
+    static unsigned long movingCandidateSince = 0;
+    static bool moving = false;
+
+    if (rawMoving) {
+        if (movingCandidateSince == 0) {
+            movingCandidateSince = millis();
+            Serial.println("[Tracker] movement candidate started");
+        }
+
+        if (!moving && millis() - movingCandidateSince >= MOVING_CONFIRM_MS) {
+            moving = true;
+            Serial.println("[Tracker] movement confirmed");
+        }
+    } else {
+        if (moving) {
+            Serial.println("[Tracker] movement cleared");
+        }
+        movingCandidateSince = 0;
+        moving = false;
+    }
 
     static bool lastMovingPrinted = false;
     if (moving != lastMovingPrinted) {
@@ -192,6 +272,7 @@ void Tracker::update() {
         }
 
         lastMovingPrinted = moving;
+        lastSentAt = millis();
     }
 
     double lat = 0.0;
@@ -231,11 +312,15 @@ void Tracker::update() {
                 }
             } else {
                 hasUsableCoordinates = !isZeroCoordinate(lat, lng);
-                if (hasUsableCoordinates) storeLastKnownGood(lat, lng, currentBearing);
+                if (hasUsableCoordinates) {
+                    storeLastKnownGood(lat, lng, currentBearing);
+                }
             }
         } else {
             hasUsableCoordinates = !isZeroCoordinate(lat, lng);
-            if (hasUsableCoordinates) storeLastKnownGood(lat, lng, currentBearing);
+            if (hasUsableCoordinates) {
+                storeLastKnownGood(lat, lng, currentBearing);
+            }
         }
     } else {
         isInvalidCoordinates = true;
@@ -260,10 +345,20 @@ void Tracker::update() {
     parkingApply(lat, lng, speed, moving);
 #endif
 
-    unsigned long sendInterval = currentInterval(moving, currentBearing);
-    if (millis() - lastSentAt < sendInterval) {
+    if (_stationarySince > 0) {
+        static unsigned long lastStationaryPrint = 0;
+        if (millis() - lastStationaryPrint >= 5000) {
+            lastStationaryPrint = millis();
+            Serial.printf("[Tracker] stationary for %lu sec\n",
+                          (millis() - _stationarySince) / 1000UL);
+        }
+    }
+
+
+    if (!shouldSend()) {
         return;
     }
+
     lastSentAt = millis();
 
     if (!hasUsableCoordinates && !_pinned) {
@@ -271,15 +366,20 @@ void Tracker::update() {
         return;
     }
 
-    float accel = imu.isReady() ? imu.getAccelMag() : 0.0f;
+#if ENABLE_IMU
+    float accel = imu.getAccelMag();
+#else
+    float accel = 0.0f;
+#endif
 
     if (isInvalidCoordinates) {
         speed = 0.0f;
+        float accelToSend = accel;
         if (ensureWifi()) {
-            sendToServer(lat, lng, speed, currentBearing, accel, true);
+            sendToServer(lat, lng, speed, currentBearing, accelToSend, true);
             releaseWifi();
         } else {
-            saveToBlackbox(lat, lng, speed, currentBearing, accel, true);
+            saveToBlackbox(lat, lng, speed, currentBearing, accelToSend, true);
         }
         return;
     }
@@ -290,8 +390,10 @@ void Tracker::update() {
     }
 
     if (moving) {
-        if (lastConnectSuccess && WiFi.status() != WL_CONNECTED) {
-            ensureWifi();
+        if (lastConnectSuccess) {
+            if (WiFi.status() != WL_CONNECTED) {
+                ensureWifi();
+            }
         }
 
         if (WiFi.status() == WL_CONNECTED) {
@@ -320,6 +422,39 @@ void Tracker::update() {
     }
 
     lastBearing = bearing;
+}
+
+unsigned long Tracker::currentInterval() {
+    if (!gps.hasLocation()) {
+        return TRACKER_INTERVAL_STATIC;
+    }
+
+#if ENABLE_IMU
+    if (imu.isReady() && !imu.isMoving()) {
+        return TRACKER_INTERVAL_STATIC;
+    }
+#endif
+
+    float speed   = gps.getSpeed();
+    float bearing = gps.getBearing();
+
+    if (speed > TRACKER_MAX_VALID_SPEED) {
+        speed = 0.0f;
+    }
+
+    if (speed < TRACKER_SPEED_THRESHOLD) {
+        return TRACKER_INTERVAL_STATIC;
+    }
+
+    if (lastBearing >= 0.0f && bearingDiff(lastBearing, bearing) >= TRACKER_BEARING_THRESHOLD) {
+        return TRACKER_INTERVAL_TURNING;
+    }
+
+    return TRACKER_INTERVAL_MOVING;
+}
+
+bool Tracker::shouldSend() {
+    return millis() - lastSentAt >= currentInterval();
 }
 
 String Tracker::buildUrl(double lat, double lng, float speed, float bearing,
@@ -400,7 +535,8 @@ void Tracker::sendToServer(double lat, double lng, float speed, float bearing,
     int code = http.GET();
     http.end();
 
-    if (code > 0 || code == HTTPC_ERROR_READ_TIMEOUT || code == HTTPC_ERROR_CONNECTION_LOST) {
+    if (code > 0 || code == HTTPC_ERROR_READ_TIMEOUT
+                 || code == HTTPC_ERROR_CONNECTION_LOST) {
         Serial.println("[Tracker] sent");
         led.blink(1, 50, 50);
     } else {
@@ -423,6 +559,7 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
     }
 
     size_t freeBytes = LittleFS.totalBytes() - LittleFS.usedBytes();
+
     if (freeBytes < TRACKER_BLACKBOX_MIN_FREE) {
         Serial.println("[Tracker] blackbox: not enough space, skipping");
         return;
@@ -441,17 +578,17 @@ void Tracker::saveToBlackbox(double lat, double lng, float speed, float bearing,
         return;
     }
 
-    f.print(timestamp);           f.print(",");
-    f.print(String(lat, 6));      f.print(",");
-    f.print(String(lng, 6));      f.print(",");
-    f.print(String(speed, 1));    f.print(",");
-    f.print(String(bearing, 1));  f.print(",");
-    f.print(String(voltage, 2));  f.print(",");
-    f.print(String(altitude, 0)); f.print(",");
-    f.print(String(sats));        f.print(",");
-    f.print(String(hdop, 1));     f.print(",");
-    f.print(String(freeKb));      f.print(",");
-    f.print(String(accel, 3));    f.print(",");
+    f.print(timestamp);              f.print(",");
+    f.print(String(lat, 6));         f.print(",");
+    f.print(String(lng, 6));         f.print(",");
+    f.print(String(speed, 1));       f.print(",");
+    f.print(String(bearing, 1));     f.print(",");
+    f.print(String(voltage, 2));     f.print(",");
+    f.print(String(altitude, 0));    f.print(",");
+    f.print(String(sats));           f.print(",");
+    f.print(String(hdop, 1));        f.print(",");
+    f.print(String(freeKb));         f.print(",");
+    f.print(String(accel, 3));       f.print(",");
     f.println(invalid ? "1" : "0");
     f.close();
 
@@ -533,7 +670,8 @@ void Tracker::flushNextLine() {
     int code = http.GET();
     http.end();
 
-    if (code > 0 || code == HTTPC_ERROR_READ_TIMEOUT || code == HTTPC_ERROR_CONNECTION_LOST) {
+    if (code > 0 || code == HTTPC_ERROR_READ_TIMEOUT
+                 || code == HTTPC_ERROR_CONNECTION_LOST) {
         led.blink(1, 50, 50);
         Serial.println("[Tracker] flush line: sent");
     } else {
@@ -563,10 +701,14 @@ bool Tracker::parkingIsMoving() const {
 
     uint8_t movingCount = 0;
     for (uint8_t i = 0; i < total; i++) {
-        if (_speedWindow[i] >= TRACKER_SPEED_THRESHOLD) movingCount++;
+        if (_speedWindow[i] >= TRACKER_SPEED_THRESHOLD) {
+            movingCount++;
+        }
     }
 
-    if (movingCount < PARKING_MOTION_MIN_MOVING) return false;
+    if (movingCount < PARKING_MOTION_MIN_MOVING) {
+        return false;
+    }
 
     uint8_t idxCurr = (_speedWindowIdx + PARKING_WINDOW_SIZE - 1) % PARKING_WINDOW_SIZE;
     uint8_t idxPrev = (_speedWindowIdx + PARKING_WINDOW_SIZE - 2) % PARKING_WINDOW_SIZE;
@@ -575,7 +717,9 @@ bool Tracker::parkingIsMoving() const {
     float prevSpeed = _speedWindow[idxPrev];
 
     float intervalSec = (float)_lastIntervalMs / 1000.0f;
-    if (intervalSec < 0.1f) intervalSec = 0.1f;
+    if (intervalSec < 0.1f) {
+        intervalSec = 0.1f;
+    }
 
     float accel = fabs(currSpeed - prevSpeed) / intervalSec;
 
@@ -625,18 +769,25 @@ void Tracker::parkingApply(double& lat, double& lng, float& speed, bool moving) 
         return;
     }
 
-    lat = _pinLat;
-    lng = _pinLng;
-    speed = 0.0f;
+    float drift = distanceTo(lat, lng, _pinLat, _pinLng);
+    if (drift <= PARKING_PIN_RADIUS_M) {
+        lat   = _pinLat;
+        lng   = _pinLng;
+        speed = 0.0f;
+    } else {
+        lat   = _pinLat;
+        lng   = _pinLng;
+        speed = 0.0f;
+    }
 }
 
-float Tracker::bearingDiff(float a, float b) const {
+float Tracker::bearingDiff(float a, float b) {
     float diff = fabs(a - b);
     if (diff > 180.0f) diff = 360.0f - diff;
     return diff;
 }
 
-float Tracker::distanceTo(double lat1, double lng1, double lat2, double lng2) const {
+float Tracker::distanceTo(double lat1, double lng1, double lat2, double lng2) {
     const float R = 6371000.0f;
     float dLat = radians(lat2 - lat1);
     float dLng = radians(lng2 - lng1);
@@ -657,6 +808,7 @@ void Tracker::syncTimeNTP() {
 
     struct tm timeinfo;
     unsigned long startedAt = millis();
+
     while (!getLocalTime(&timeinfo)) {
         if (millis() - startedAt > 5000) {
             Serial.println("[Tracker] NTP sync failed");
@@ -689,7 +841,8 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
         if (gpsTime > 0) {
             bool tooOld         = gpsTime < MIN_VALID_TIME;
             bool tooFarInFuture = gpsTime > MAX_VALID_TIME;
-            bool inconsistent   = lastValidUnixTime > 0 && gpsTime > lastValidUnixTime + ONE_YEAR_SECONDS;
+            bool inconsistent   = lastValidUnixTime > 0 &&
+                                  gpsTime > lastValidUnixTime + ONE_YEAR_SECONDS;
 
             if (!tooOld && !tooFarInFuture && !inconsistent) {
                 lastValidUnixTime = gpsTime;
@@ -706,9 +859,12 @@ unsigned long Tracker::getSafeTimestamp(bool invalid) {
     if (timeSynced) {
         struct tm timeinfo;
         if (getLocalTime(&timeinfo)) {
-            unsigned long ntpTime = (unsigned long)mktime(&timeinfo) + timezoneSync.getOffsetSec();
+            unsigned long ntpTime = (unsigned long)mktime(&timeinfo)
+                                    + timezoneSync.getOffsetSec();
             if (ntpTime >= MIN_VALID_TIME && ntpTime <= MAX_VALID_TIME) {
-                if (!invalid) lastValidUnixTime = ntpTime;
+                if (!invalid) {
+                    lastValidUnixTime = ntpTime;
+                }
                 return ntpTime;
             }
             Serial.print("[Tracker] suspicious NTP time rejected: ");
@@ -734,3 +890,9 @@ void Tracker::forceReleaseWifi() {
     lastConnectSuccess = false;
     Serial.println("[Tracker] WiFi force released for portal");
 }
+
+#if ENABLE_IMU
+bool Tracker::imuMoving() const {
+    return imu.isMoving();
+}
+#endif
